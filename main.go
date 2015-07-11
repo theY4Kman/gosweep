@@ -116,9 +116,6 @@ func main() {
 func (c *cell) relCell(d_x, d_y int) *cell {
 	x := c.X + d_x
 	y := c.Y + d_y
-	if x < 0 || x >= brd.Width || y < 0 || y >= brd.Height {
-		return nil
-	}
 	return brd.CellAt(x, y)
 }
 
@@ -242,6 +239,9 @@ func (b board) TranslateScreenPoint(loc geom.Point) (x, y int) {
 }
 
 func (b board) CellAt(x, y int) *cell {
+	if x < 0 || x >= brd.Width || y < 0 || y >= brd.Height {
+		return nil
+	}
 	return &b.Cells[x][y]
 }
 
@@ -261,7 +261,9 @@ func touch(e event.Touch, c event.Config) {
 	if e.Change == event.ChangeOn {
 		x, y := brd.TranslateScreenPoint(e.Loc)
 		touched := brd.CellAt(x, y)
-		touched.WasTouched()
+		if touched != nil {
+			touched.WasTouched()
+		}
 	}
 }
 
