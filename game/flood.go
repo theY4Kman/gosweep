@@ -1,6 +1,6 @@
 // Shamelessly stolen from: https://github.com/hinshun/floodfill
 
-package main
+package game
 
 import "sync"
 

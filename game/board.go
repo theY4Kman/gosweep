@@ -1,4 +1,4 @@
-package main
+package game
 
 import (
 	"github.com/faiface/pixel"
@@ -16,13 +16,53 @@ type Board struct {
 	unrevealedCells map[*Cell]struct{}
 
 	revealChan chan *Cell
+
+	director Director
 }
 
-func (board *Board) cellAt(x, y uint) *Cell {
+func (board *Board) Width() uint {
+	return board.width
+}
+
+func (board *Board) Height() uint {
+	return board.height
+}
+
+func (board *Board) NumCells() uint {
+	return board.width * board.height
+}
+
+func (board *Board) CellAt(x, y uint) *Cell {
 	if x >= 0 && y >= 0 && x < board.width && y < board.height {
 		return &board.cells[y][x]
 	}
 	return nil
+}
+
+func (board *Board) Cells() <-chan *Cell {
+	out := make(chan *Cell)
+	go func() {
+		for y := uint(0); y < board.height; y++ {
+			for x := uint(0); x < board.width; x++ {
+				out <- board.CellAt(x, y)
+			}
+		}
+		close(out)
+	}()
+	return out
+}
+
+func (board *Board) UnrevealedCells() <-chan *Cell {
+	out := make(chan *Cell)
+	go func() {
+		for cell := range board.Cells() {
+			if !cell.isRevealed {
+				out <- cell
+			}
+		}
+		close(out)
+	}()
+	return out
 }
 
 func (board *Board) screenToGridCoords(pos pixel.Vec) (uint, uint) {
@@ -35,10 +75,12 @@ func (board *Board) canPlay() bool {
 
 func (board *Board) win() {
 	board.state = Won
+	board.endGame()
 }
 
 func (board *Board) lose() {
 	board.state = Lost
+	board.endGame()
 
 	revealLost := func(cells <-chan *Cell) {
 		for cell := range cells {
@@ -46,31 +88,30 @@ func (board *Board) lose() {
 		}
 	}
 
-	cells := board.getCells()
+	cells := board.Cells()
 
 	for i := 0; i < 4; i++ {
 		go revealLost(cells)
 	}
 }
 
-func (board *Board) getCells() <-chan *Cell {
-	out := make(chan *Cell)
-	go func() {
-		for y := uint(0); y < board.height; y++ {
-			for x := uint(0); x < board.width; x++ {
-				out <- board.cellAt(x, y)
-			}
-		}
-		close(out)
-	}()
-	return out
+func (board *Board) endGame() {
+	if board.director != nil {
+		board.director.End()
+	}
+}
+
+func (board *Board) startGame() {
+	if board.director != nil {
+		board.director.Start(board)
+	}
 }
 
 func (board *Board) markRevealed(cell *Cell) {
 	board.revealChan <- cell
 }
 
-func createBoard(width uint, height uint, numMines uint) *Board {
+func createBoard(width uint, height uint, numMines uint, director Director) *Board {
 	board := Board{
 		state:           Ongoing,
 		width:           width,
@@ -79,6 +120,7 @@ func createBoard(width uint, height uint, numMines uint) *Board {
 		cells:           make([][]Cell, height),
 		unrevealedCells: make(map[*Cell]struct{}),
 		revealChan:      make(chan *Cell),
+		director:        director,
 	}
 
 	// Perform all unrevealedCell modifications in a single goroutine, to avoid
@@ -132,11 +174,11 @@ func createBoard(width uint, height uint, numMines uint) *Board {
 	for i := uint(0); i < numMines; i++ {
 		cellIdx = cellIndexes[i]
 		y, x := cellIdx/width, cellIdx%width
-		cell := board.cellAt(x, y)
+		cell := board.CellAt(x, y)
 		cell.isMine = true
 		delete(board.unrevealedCells, cell)
 
-		cell.sendNeighbors(mineNeighborChan)
+		cell.SendNeighbors(mineNeighborChan)
 	}
 	close(mineNeighborChan)
 
