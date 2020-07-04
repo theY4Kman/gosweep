@@ -17,20 +17,44 @@ import (
 
 var cellSprites = map[CellState]*pixel.Sprite{}
 
-func Run() {
-	RunDirector(nil)
+type GameMode int
+
+const (
+	Classic GameMode = iota
+	Win7
+)
+
+type GameConfig struct {
+	Width, Height uint
+	NumMines      uint
+	Mode          GameMode
+
+	Director Director
 }
 
-func RunDirector(director Director) {
-	width := uint(30)
-	height := uint(16)
-	numMines := uint(99)
+func NewGameConfig() GameConfig {
+	return GameConfig{
+		Width:    30,
+		Height:   16,
+		NumMines: 99,
+		Mode: Classic,
+		Director: nil,
+	}
+}
 
+func (config GameConfig) createBoard() *Board {
+	return createBoard(config.Width, config.Height, config.NumMines, config.Director)
+}
+
+func Run(config GameConfig) {
 	headerHeight := uint(50)
 
 	cfg := pixelgl.WindowConfig{
-		Title:  "gosweep",
-		Bounds: pixel.R(0, 0, float64(width*cellWidth), float64(height*cellWidth+headerHeight)),
+		Title: "gosweep",
+		Bounds: pixel.R(
+			0, 0,
+			float64(config.Width*cellWidth), float64(config.Height*cellWidth+headerHeight),
+		),
 	}
 	win, err := pixelgl.NewWindow(cfg)
 	if err != nil {
@@ -47,7 +71,9 @@ func RunDirector(director Director) {
 	scoreText := text.New(topLeft.Add(pixel.V(20, -30)), scoreAtlas)
 	scoreText.Color = colornames.Black
 
-	board := createBoard(width, height, numMines, director)
+	board := config.createBoard()
+	hasClicked := false
+
 	board.startGame()
 
 	var (
@@ -71,7 +97,7 @@ func RunDirector(director Director) {
 		scoreText.Clear()
 		scoreText.Color = colornames.Black
 
-		fmt.Fprintf(scoreText, "%03d", board.numMines - board.numFlags)
+		fmt.Fprintf(scoreText, "%03d", board.numMines-board.numFlags)
 		if !board.canPlay() {
 			var boardState string
 			if board.state == Won {
@@ -103,7 +129,8 @@ func RunDirector(director Director) {
 
 		if !board.canPlay() {
 			if win.JustPressed(pixelgl.KeyEnter) {
-				board = createBoard(width, height, numMines, director)
+				board = config.createBoard()
+				hasClicked = false
 				board.startGame()
 			}
 
@@ -116,6 +143,14 @@ func RunDirector(director Director) {
 
 			if cell != nil {
 				if win.JustPressed(pixelgl.MouseButtonLeft) {
+					if !hasClicked {
+						hasClicked = true
+
+						if config.Mode == Win7 {
+							board.clearSurroundingMines(cell)
+						}
+					}
+
 					cell.Click()
 				}
 				if win.JustPressed(pixelgl.MouseButtonRight) {

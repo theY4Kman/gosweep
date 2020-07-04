@@ -10,7 +10,12 @@ import (
 
 func main() {
 	rand.Seed(time.Now().UnixNano())
+
+	gameConfig := game.NewGameConfig()
+	gameConfig.Mode = game.Win7
+	gameConfig.Director = &random.Director{}
+
 	pixelgl.Run(func() {
-		game.RunDirector(&random.RandomDirector{})
+		game.Run(gameConfig)
 	})
 }

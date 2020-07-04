@@ -6,13 +6,13 @@ import (
 	"time"
 )
 
-type RandomDirector struct {
+type Director struct {
 	act   chan struct{}
 	done  chan struct{}
 	board *game.Board
 }
 
-func (director *RandomDirector) Start(board *game.Board) {
+func (director *Director) Init(board *game.Board) {
 	director.board = board
 	director.act = make(chan struct{})
 	director.done = make(chan struct{})
@@ -38,21 +38,29 @@ func (director *RandomDirector) Start(board *game.Board) {
 			}
 		}
 	}()
+}
 
+func (director *Director) Act() {
+	director.act <- struct{}{}
+}
+
+func (director *Director) ActContinuously() {
 	go func() {
+		tick := time.Tick(500 * time.Millisecond)
+
 		for {
 			select {
 			case <- director.done:
 				return
+			case <- tick:
+				director.Act()
 			default:
-				time.Sleep(500 * time.Millisecond)
-				director.act <- struct{}{}
 			}
 		}
 	}()
 }
 
-func (director *RandomDirector) End() {
+func (director *Director) End() {
 	director.done <- struct{}{}
 	close(director.act)
 }

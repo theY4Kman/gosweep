@@ -11,11 +11,11 @@ type Board struct {
 	numMines      uint
 	cells         [][]Cell
 
-	state           BoardState
-	numFlags        uint
-	unrevealedCells map[*Cell]struct{}
+	state          BoardState
+	numFlags       uint
+	remainingCells map[*Cell]struct{}
 
-	revealChan chan *Cell
+	revelations chan *Cell
 
 	director Director
 }
@@ -103,33 +103,93 @@ func (board *Board) endGame() {
 
 func (board *Board) startGame() {
 	if board.director != nil {
-		board.director.Start(board)
+		board.director.Init(board)
+		board.director.ActContinuously()
 	}
 }
 
 func (board *Board) markRevealed(cell *Cell) {
-	board.revealChan <- cell
+	board.revelations <- cell
+}
+
+func (board *Board) clearSurroundingMines(center *Cell) {
+	possibleRelocationsMap := make(map[*Cell]struct{})
+	for cell := range board.Cells() {
+		if !cell.isMine {
+			possibleRelocationsMap[cell] = struct{}{}
+		}
+	}
+
+	decreaseNumMines := make(chan *Cell)
+	go func() {
+		for cell := range decreaseNumMines {
+			atomic.AddUint32(&cell.numMines, ^uint32(1-1))
+		}
+	}()
+
+	numSurroundingMines := 0
+	for cell := range center.SelfNeighbors() {
+		delete(possibleRelocationsMap, cell)
+
+		if cell.isMine {
+			numSurroundingMines++
+
+			cell.isMine = false
+			board.remainingCells[cell] = struct{}{}
+
+			cell.SendNeighbors(decreaseNumMines)
+		}
+	}
+	close(decreaseNumMines)
+
+	possibleRelocations := make([]*Cell, len(possibleRelocationsMap))
+
+	i := 0
+	for cell := range possibleRelocationsMap {
+		possibleRelocations[i] = cell
+		i++
+	}
+
+	rand.Shuffle(len(possibleRelocations), func(i, j int) {
+		possibleRelocations[i], possibleRelocations[j] = possibleRelocations[j], possibleRelocations[i]
+	})
+
+	increaseNumMines := make(chan *Cell)
+	go func() {
+		for cell := range increaseNumMines {
+			atomic.AddUint32(&cell.numMines, 1)
+		}
+	}()
+
+	for i := 0; i<numSurroundingMines; i++ {
+		cell := possibleRelocations[i]
+		cell.isMine = true
+		delete(board.remainingCells, cell)
+
+		cell.SendNeighbors(increaseNumMines)
+	}
+	close(increaseNumMines)
 }
 
 func createBoard(width uint, height uint, numMines uint, director Director) *Board {
 	board := Board{
-		state:           Ongoing,
-		width:           width,
-		height:          height,
-		numMines:        numMines,
-		cells:           make([][]Cell, height),
-		unrevealedCells: make(map[*Cell]struct{}),
-		revealChan:      make(chan *Cell),
-		director:        director,
+		state:          Ongoing,
+		width:          width,
+		height:         height,
+		numMines:       numMines,
+		cells:          make([][]Cell, height),
+		remainingCells: make(map[*Cell]struct{}),
+		revelations:    make(chan *Cell),
+		director:       director,
 	}
 
 	// Perform all unrevealedCell modifications in a single goroutine, to avoid
 	// concurrent modifications
 	go func() {
-		for cell := range board.revealChan {
-			delete(board.unrevealedCells, cell)
+		for cell := range board.revelations {
+			delete(board.remainingCells, cell)
 
-			if len(board.unrevealedCells) == 0 {
+			if len(board.remainingCells) == 0 {
 				board.win()
 			}
 		}
@@ -153,7 +213,7 @@ func createBoard(width uint, height uint, numMines uint, director Director) *Boa
 			cell.sprite = cellSprites[Unrevealed]
 			cell.isDirty = true
 
-			board.unrevealedCells[cell] = struct{}{}
+			board.remainingCells[cell] = struct{}{}
 
 			cellIndexes[cellIdx] = cellIdx
 			cellIdx++
@@ -176,7 +236,7 @@ func createBoard(width uint, height uint, numMines uint, director Director) *Boa
 		y, x := cellIdx/width, cellIdx%width
 		cell := board.CellAt(x, y)
 		cell.isMine = true
-		delete(board.unrevealedCells, cell)
+		delete(board.remainingCells, cell)
 
 		cell.SendNeighbors(mineNeighborChan)
 	}

@@ -39,6 +39,16 @@ func (cell *Cell) IsFlagged() bool {
 	return cell.isFlagged
 }
 
+func (cell *Cell) SelfNeighbors() <-chan *Cell {
+	out := make(chan *Cell)
+	go func() {
+		out <- cell
+		cell.SendNeighbors(out)
+		close(out)
+	}()
+	return out
+}
+
 func (cell *Cell) Neighbors() <-chan *Cell {
 	out := make(chan *Cell)
 	go func() {
