@@ -3,24 +3,21 @@ package random
 import (
 	"github.com/they4kman/gosweep/game"
 	"math/rand"
-	"time"
 )
 
 type Director struct {
-	act   chan struct{}
-	done  chan struct{}
-	board *game.Board
+	game.BaseDirector
+
+	act   chan chan<- game.CellAction
 }
 
 func (director *Director) Init(board *game.Board) {
-	director.board = board
-	director.act = make(chan struct{})
-	director.done = make(chan struct{})
+	director.act = make(chan chan<- game.CellAction)
 
 	go func() {
-		unrevealedCells := make([]*game.Cell, director.board.NumCells())
+		unrevealedCells := make([]*game.Cell, board.NumCells())
 		i := 0
-		for cell := range director.board.Cells() {
+		for cell := range board.Cells() {
 			unrevealedCells[i] = cell
 			i++
 		}
@@ -29,38 +26,23 @@ func (director *Director) Init(board *game.Board) {
 			unrevealedCells[i], unrevealedCells[j] = unrevealedCells[j], unrevealedCells[i]
 		})
 
-		for range director.act {
+		for actions := range director.act {
 			for _, cell := range unrevealedCells {
 				if !cell.IsRevealed() && !cell.IsFlagged() {
-					cell.Click()
+					actions <- cell.Click()
 					break
 				}
 			}
+
+			close(actions)
 		}
 	}()
 }
 
-func (director *Director) Act() {
-	director.act <- struct{}{}
-}
-
-func (director *Director) ActContinuously() {
-	go func() {
-		tick := time.Tick(500 * time.Millisecond)
-
-		for {
-			select {
-			case <- director.done:
-				return
-			case <- tick:
-				director.Act()
-			default:
-			}
-		}
-	}()
+func (director *Director) Act(actions chan<- game.CellAction) {
+	director.act <- actions
 }
 
 func (director *Director) End() {
-	director.done <- struct{}{}
 	close(director.act)
 }

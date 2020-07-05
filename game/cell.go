@@ -39,6 +39,10 @@ func (cell *Cell) IsFlagged() bool {
 	return cell.isFlagged
 }
 
+func (cell *Cell) NumMines() uint32 {
+	return cell.numMines
+}
+
 func (cell *Cell) SelfNeighbors() <-chan *Cell {
 	out := make(chan *Cell)
 	go func() {
@@ -94,7 +98,39 @@ func (cell *Cell) SendNeighbors(out chan<- *Cell) {
 	}
 }
 
-func (cell *Cell) Click() {
+func (cell *Cell) Click() CellAction {
+	return CellAction{
+		cell: cell,
+		action: Click,
+	}
+}
+
+func (cell *Cell) RightClick() CellAction {
+	return CellAction{
+		cell: cell,
+		action: RightClick,
+	}
+}
+
+func (cell *Cell) MiddleClick() CellAction {
+	return CellAction{
+		cell: cell,
+		action: MiddleClick,
+	}
+}
+
+func (cell *Cell) click() {
+	cell.board.actionGroup.Add(1)
+	defer cell.board.actionGroup.Done()
+
+	if !cell.board.hasClicked {
+		cell.board.hasClicked = true
+
+		if cell.board.mode == Win7 {
+			cell.board.clearSurroundingMines(cell)
+		}
+	}
+
 	if !cell.isRevealed {
 		if !cell.isMine && cell.numMines == 0 {
 			cell.cascadeEmpty()
@@ -104,13 +140,16 @@ func (cell *Cell) Click() {
 	}
 }
 
-func (cell *Cell) RightClick() {
+func (cell *Cell) rightClick() {
+	cell.board.actionGroup.Add(1)
+	defer cell.board.actionGroup.Done()
+
 	if !cell.isRevealed {
 		cell.toggleFlagged()
 	}
 }
 
-func (cell *Cell) MiddleClick() {
+func (cell *Cell) middleClick() {
 	if !cell.isRevealed {
 		return
 	}
@@ -127,7 +166,7 @@ func (cell *Cell) MiddleClick() {
 
 	if cell.numMines == numFlaggedNeighbors {
 		for neighbor := range cell.Neighbors() {
-			neighbor.Click()
+			neighbor.click()
 		}
 	}
 }
@@ -141,6 +180,8 @@ func (cell *Cell) toggleFlagged() {
 		cell.setState(Unrevealed)
 		cell.board.numFlags--
 	}
+
+	cell.board.markChanged(cell)
 }
 
 func (cell *Cell) reveal() {
@@ -158,6 +199,7 @@ func (cell *Cell) reveal() {
 			cell.setState(CellState(cell.numMines))
 		}
 
+		cell.board.markChanged(cell)
 		cell.board.markRevealed(cell)
 	}
 }

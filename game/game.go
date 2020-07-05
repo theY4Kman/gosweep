@@ -2,6 +2,7 @@ package game
 
 import (
 	"fmt"
+	"github.com/faiface/pixel/imdraw"
 	"github.com/faiface/pixel/text"
 	"golang.org/x/image/font/basicfont"
 	"image"
@@ -43,7 +44,7 @@ func NewGameConfig() GameConfig {
 }
 
 func (config GameConfig) createBoard() *Board {
-	return createBoard(config.Width, config.Height, config.NumMines, config.Director)
+	return createBoard(config.Width, config.Height, config.NumMines, config.Mode, config.Director)
 }
 
 func Run(config GameConfig) {
@@ -72,8 +73,6 @@ func Run(config GameConfig) {
 	scoreText.Color = colornames.Black
 
 	board := config.createBoard()
-	hasClicked := false
-
 	board.startGame()
 
 	var (
@@ -127,10 +126,48 @@ func Run(config GameConfig) {
 		}
 		batch.Draw(win)
 
+		if board.directorAnnotations != nil {
+			imd := imdraw.New(nil)
+
+			now := time.Now()
+			board.directorAnnotationLock.Lock()
+			for cellAction, expiresAt := range board.directorAnnotations {
+				if now.After(expiresAt) {
+					delete(board.directorAnnotations, cellAction)
+					continue
+				}
+
+				cell := cellAction.cell
+				start := boardTopLeft.Add(
+					pixel.V(
+						float64(cellWidth*cell.x),
+						-float64(cellWidth*cell.y),
+					),
+				)
+				end := start.Add(pixel.V(cellWidth, cellWidth))
+				baseColor := pixel.Alpha(0)
+
+				switch cellAction.action {
+				case Click:
+					baseColor = pixel.RGB(1, 0, 0)
+				case RightClick:
+					baseColor = pixel.RGB(0, 0, 1)
+				case MiddleClick:
+					baseColor = pixel.RGB(0, 1, 0)
+				}
+
+				imd.Color = baseColor.Mul(pixel.Alpha(0.5))
+				imd.Push(start, end)
+				imd.Rectangle(0)  // 0 = filled
+			}
+
+			board.directorAnnotationLock.Unlock()
+			imd.Draw(win)
+		}
+
 		if !board.canPlay() {
 			if win.JustPressed(pixelgl.KeyEnter) {
 				board = config.createBoard()
-				hasClicked = false
 				board.startGame()
 			}
 
@@ -143,21 +180,13 @@ func Run(config GameConfig) {
 
 			if cell != nil {
 				if win.JustPressed(pixelgl.MouseButtonLeft) {
-					if !hasClicked {
-						hasClicked = true
-
-						if config.Mode == Win7 {
-							board.clearSurroundingMines(cell)
-						}
-					}
-
-					cell.Click()
+					cell.click()
 				}
 				if win.JustPressed(pixelgl.MouseButtonRight) {
-					cell.RightClick()
+					cell.rightClick()
 				}
 				if win.JustPressed(pixelgl.MouseButtonMiddle) {
-					cell.MiddleClick()
+					cell.middleClick()
 				}
 			}
 		}

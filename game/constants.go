@@ -41,8 +41,6 @@ var CellStates = []CellState {
 
 const (
 	cellWidth    = 16
-	marginTop    = 12
-	marginBottom = 20
 )
 
 const (

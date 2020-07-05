@@ -3,21 +3,33 @@ package game
 import (
 	"github.com/faiface/pixel"
 	"math/rand"
+	"sync"
 	"sync/atomic"
+	"time"
 )
 
 type Board struct {
 	width, height uint // in number of cells
 	numMines      uint
-	cells         [][]Cell
+	mode          GameMode
 
 	state          BoardState
+	cells          [][]Cell
+	hasClicked     bool
 	numFlags       uint
 	remainingCells map[*Cell]struct{}
 
 	revelations chan *Cell
+	actionGroup sync.WaitGroup
 
-	director Director
+	director             Director
+	directorAct          chan struct{}
+	directorStop         chan struct{}
+	directorActRequested *sync.Cond
+	directorCellChanges  chan *Cell
+
+	directorAnnotations    map[CellAction]time.Time
+	directorAnnotationLock sync.Mutex
 }
 
 func (board *Board) Width() uint {
@@ -65,6 +77,12 @@ func (board *Board) UnrevealedCells() <-chan *Cell {
 	return out
 }
 
+func (board *Board) RequestDirectorAct() {
+	if board.directorActRequested != nil {
+		board.directorActRequested.Broadcast()
+	}
+}
+
 func (board *Board) screenToGridCoords(pos pixel.Vec) (uint, uint) {
 	return uint(pos.X) / cellWidth, board.height - uint(pos.Y)/cellWidth - 1
 }
@@ -97,6 +115,9 @@ func (board *Board) lose() {
 
 func (board *Board) endGame() {
 	if board.director != nil {
+		board.directorStop <- struct{}{}
+		close(board.directorStop)
+
 		board.director.End()
 	}
 }
@@ -104,7 +125,7 @@ func (board *Board) endGame() {
 func (board *Board) startGame() {
 	if board.director != nil {
 		board.director.Init(board)
-		board.director.ActContinuously()
+		board.director.ActContinuously(board.directorAct, board.directorStop)
 	}
 }
 
@@ -112,7 +133,15 @@ func (board *Board) markRevealed(cell *Cell) {
 	board.revelations <- cell
 }
 
+func (board *Board) markChanged(cell *Cell) {
+	if board.directorCellChanges != nil {
+		board.directorCellChanges <- cell
+	}
+}
+
 func (board *Board) clearSurroundingMines(center *Cell) {
+	wg := sync.WaitGroup{}
+
 	possibleRelocationsMap := make(map[*Cell]struct{})
 	for cell := range board.Cells() {
 		if !cell.isMine {
@@ -121,10 +150,12 @@ func (board *Board) clearSurroundingMines(center *Cell) {
 	}
 
 	decreaseNumMines := make(chan *Cell)
+	wg.Add(1)
 	go func() {
 		for cell := range decreaseNumMines {
 			atomic.AddUint32(&cell.numMines, ^uint32(1-1))
 		}
+		wg.Done()
 	}()
 
 	numSurroundingMines := 0
@@ -155,13 +186,15 @@ func (board *Board) clearSurroundingMines(center *Cell) {
 	})
 
 	increaseNumMines := make(chan *Cell)
+	wg.Add(1)
 	go func() {
 		for cell := range increaseNumMines {
 			atomic.AddUint32(&cell.numMines, 1)
 		}
+		wg.Done()
 	}()
 
-	for i := 0; i<numSurroundingMines; i++ {
+	for i := 0; i < numSurroundingMines; i++ {
 		cell := possibleRelocations[i]
 		cell.isMine = true
 		delete(board.remainingCells, cell)
@@ -169,18 +202,70 @@ func (board *Board) clearSurroundingMines(center *Cell) {
 		cell.SendNeighbors(increaseNumMines)
 	}
 	close(increaseNumMines)
+
+	wg.Wait()
 }
 
-func createBoard(width uint, height uint, numMines uint, director Director) *Board {
+func createBoard(width uint, height uint, numMines uint, mode GameMode, director Director) *Board {
 	board := Board{
+		width:    width,
+		height:   height,
+		numMines: numMines,
+		mode:     mode,
+
 		state:          Ongoing,
-		width:          width,
-		height:         height,
-		numMines:       numMines,
 		cells:          make([][]Cell, height),
+		hasClicked:     false,
+		numFlags:       0,
 		remainingCells: make(map[*Cell]struct{}),
-		revelations:    make(chan *Cell),
-		director:       director,
+
+		actionGroup: sync.WaitGroup{},
+		revelations: make(chan *Cell),
+
+		director: director,
+	}
+
+	if director != nil {
+		board.directorAct = make(chan struct{})
+		board.directorStop = make(chan struct{})
+		board.directorActRequested = sync.NewCond(&sync.Mutex{})
+		board.directorCellChanges = make(chan *Cell, board.NumCells())
+		board.directorAnnotations = make(map[CellAction]time.Time)
+		board.directorAnnotationLock = sync.Mutex{}
+
+		go func() {
+			for range board.directorAct {
+				board.RequestDirectorAct()
+			}
+		}()
+
+		go func() {
+			for {
+				board.directorActRequested.L.Lock()
+				board.directorActRequested.Wait()
+
+				close(board.directorCellChanges)
+				board.director.CellChanges(board.directorCellChanges)
+				board.directorCellChanges = make(chan *Cell, board.NumCells())
+
+				actions := make(chan CellAction, board.NumCells())
+				go board.director.Act(actions)
+
+				dedupedActions := make(map[CellAction]struct{})
+				board.directorAnnotationLock.Lock()
+				for cellAction := range actions {
+					dedupedActions[cellAction] = struct{}{}
+					board.directorAnnotations[cellAction] = time.Now().Add(200 * time.Millisecond)
+				}
+				board.directorAnnotationLock.Unlock()
+
+				for cellAction := range dedupedActions {
+					cellAction.perform()
+				}
+
+				board.directorActRequested.L.Unlock()
+			}
+		}()
 	}
 
 	// Perform all unrevealedCell modifications in a single goroutine, to avoid
