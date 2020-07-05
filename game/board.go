@@ -117,6 +117,7 @@ func (board *Board) endGame() {
 	if board.director != nil {
 		board.directorStop <- struct{}{}
 		close(board.directorStop)
+		board.directorStop = nil
 
 		board.director.End()
 	}
@@ -243,6 +244,10 @@ func createBoard(width uint, height uint, numMines uint, mode GameMode, director
 			for {
 				board.directorActRequested.L.Lock()
 				board.directorActRequested.Wait()
+
+				if board.directorStop == nil {
+					return
+				}
 
 				close(board.directorCellChanges)
 				board.director.CellChanges(board.directorCellChanges)
