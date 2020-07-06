@@ -57,7 +57,7 @@ func (director *BaseDirector) Act(chan<- CellAction) {
 
 func (director *BaseDirector) ActContinuously(act chan<- struct{}, done <-chan struct{}) {
 	go func() {
-		tick := time.Tick(50 * time.Millisecond)
+		tick := time.Tick(25 * time.Millisecond)
 
 		for {
 			select {

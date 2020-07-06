@@ -13,9 +13,18 @@ func main() {
 
 	gameConfig := game.NewGameConfig()
 	gameConfig.Mode = game.Win7
+
 	gameConfig.Width = 110
 	gameConfig.Height = 60
 	gameConfig.NumMines = 1200
+
+	//gameConfig.Width = 30
+	//gameConfig.Height = 16
+	//gameConfig.NumMines = 99
+
+	//gameConfig.Width = 10
+	//gameConfig.Height = 10
+	//gameConfig.NumMines = 30
 	gameConfig.Director = &constraint.Director{}
 
 	pixelgl.Run(func() {

@@ -1,8 +1,12 @@
 package constraint
 
 import (
+	"fmt"
 	"github.com/they4kman/gosweep/director/random"
 	"github.com/they4kman/gosweep/game"
+	"math"
+	"reflect"
+	"strings"
 	"sync"
 )
 
@@ -25,6 +29,33 @@ type Observation struct {
 	cells    map[*game.Cell]struct{}
 }
 
+func (observation Observation) String() string {
+	var cellsRepr strings.Builder
+	lastIdx := len(observation.cells) - 1
+	i := 0
+	for cell := range observation.cells {
+		cellsRepr.WriteString(fmt.Sprintf("(%d, %d)", cell.X(), cell.Y()))
+
+		if i != lastIdx {
+			cellsRepr.WriteString(", ")
+		}
+		i++
+	}
+
+	var originRepr string
+	if observation.origin == nil {
+		originRepr = "?"
+	} else {
+		originRepr = fmt.Sprintf("(%d, %d)", observation.origin.X(), observation.origin.Y())
+	}
+
+	return fmt.Sprintf("Obs[%8s, %d ε %s]", originRepr, observation.numMines, cellsRepr.String())
+}
+
+func (observation Observation) MineProbability() float32 {
+	return float32(observation.numMines) / float32(len(observation.cells))
+}
+
 func (director *Director) Init(board *game.Board) {
 	director.board = board
 	director.act = make(chan chan<- game.CellAction)
@@ -41,7 +72,23 @@ func (director *Director) Init(board *game.Board) {
 				director.actRandom(actions)
 				director.hasActed = true
 			} else {
-				director.actDeliberate(actions)
+				deliberateActions := make(chan game.CellAction)
+
+				go func() {
+					foundAction := false
+					for cellAction := range deliberateActions {
+						foundAction = true
+						actions <- cellAction
+					}
+
+					if !foundAction {
+						director.actLowestProbability(actions)
+					} else {
+						close(actions)
+					}
+				}()
+
+				director.actDeliberate(deliberateActions)
 			}
 		}
 	}()
@@ -54,31 +101,74 @@ func (director *Director) actRandom(actions chan<- game.CellAction) {
 	randomDirector.End()
 }
 
+func (director *Director) actLowestProbability(actions chan<- game.CellAction) {
+	lowestProbability := float32(math.Inf(1))
+	var lowestProbabilityCell *game.Cell
+
+	cellProbabilities := make(map[*game.Cell]float32)
+	for observation := range director.observations {
+		probability := observation.MineProbability()
+
+		for cell := range observation.cells {
+			pastProbability, hasPastProbability := cellProbabilities[cell]
+			if !hasPastProbability || probability < pastProbability {
+				cellProbabilities[cell] = probability
+			}
+
+			if probability < lowestProbability {
+				lowestProbability = probability
+				lowestProbabilityCell = cell
+			}
+		}
+	}
+
+	if lowestProbabilityCell != nil {
+		actions <- lowestProbabilityCell.Click()
+	}
+
+	close(actions)
+}
+
 func (director *Director) actDeliberate(actions chan<- game.CellAction) {
 	director.observationsLock.Lock()
 	defer director.observationsLock.Unlock()
 
-	for observation := range director.observations {
-		if observation.numMines == len(observation.cells) {
-			for cell := range observation.cells {
-				actions <- cell.RightClick()
+	wg := sync.WaitGroup{}
+	findDeliberateActions := func(observations <-chan *Observation) {
+		defer wg.Done()
+
+		for observation := range observations {
+			if observation.numMines == len(observation.cells) {
+				for cell := range observation.cells {
+					actions <- cell.RightClick()
+				}
+
+				observation.cells = nil
+				observation.numMines = 0
+
+			} else if observation.numMines == 0 {
+				for cell := range observation.cells {
+					actions <- cell.Click()
+				}
+
+				observation.cells = nil
+				observation.numMines = 0
 			}
-
-			observation.cells = nil
-			observation.numMines = 0
-			delete(director.observations, observation)
-
-		} else if observation.numMines == 0 {
-			for cell := range observation.cells {
-				actions <- cell.Click()
-			}
-
-			observation.cells = nil
-			observation.numMines = 0
-			delete(director.observations, observation)
 		}
 	}
 
+	observations := make(chan *Observation)
+	for i := 0; i < 1; i++ {
+		wg.Add(1)
+		go findDeliberateActions(observations)
+	}
+
+	for observation := range director.observations {
+		observations <- observation
+	}
+	close(observations)
+
+	wg.Wait()
 	close(actions)
 }
 
@@ -89,7 +179,7 @@ func (director *Director) Act(actions chan<- game.CellAction) {
 func (director *Director) CellChanges(changes <-chan *game.Cell) {
 	for cell := range changes {
 		if cell.IsRevealed() {
-			director.CellRevealed(cell)
+			director.cellRevealed(cell)
 		}
 
 		if cellObservations, ok := director.observationsByCell[cell]; ok {
@@ -97,17 +187,133 @@ func (director *Director) CellChanges(changes <-chan *game.Cell) {
 				if observation.numMines == 0 || len(observation.cells) == 0 {
 					delete(cellObservations, observation)
 				} else if cell.IsFlagged() {
-					delete(observation.cells, cell)
+					director.removeObservationCell(observation, cell)
 					observation.numMines--
 				} else if cell.IsRevealed() {
-					delete(observation.cells, cell)
+					director.removeObservationCell(observation, cell)
+				}
+			}
+		}
+	}
+
+	// Simplify/split observations
+	for i := 0; i < 2; i++ {
+		director.simplifyObservations()
+	}
+}
+
+func (director *Director) simplifyObservations() {
+	for observation := range director.observations {
+		if len(observation.cells) == 0 || observation.origin == nil {
+			director.removeObservation(observation)
+			continue
+		}
+
+		visited := make(map[*Observation]struct{})
+
+		for cell := range observation.cells {
+			for intersectingObs := range director.observationsByCell[cell] {
+				if intersectingObs == observation {
+					continue
+				}
+				if _, alreadyVisited := visited[intersectingObs]; alreadyVisited {
+					continue
+				}
+				visited[intersectingObs] = struct{}{}
+
+				isSubset := true
+				sharedCells := make(map[*game.Cell]struct{})
+				for cell := range observation.cells {
+					if _, isInIntersectingObs := intersectingObs.cells[cell]; isInIntersectingObs {
+						sharedCells[cell] = struct{}{}
+					} else {
+						isSubset = false
+					}
+				}
+
+				if isSubset {
+					splitObs := Observation{
+						numMines: intersectingObs.numMines - observation.numMines,
+						cells:    make(map[*game.Cell]struct{}),
+					}
+					for cell := range intersectingObs.cells {
+						if _, isInObs := observation.cells[cell]; !isInObs {
+							splitObs.cells[cell] = struct{}{}
+						}
+					}
+
+					director.addObservation(&splitObs)
+				} else if observation.numMines == 1 && len(sharedCells) > 1 {
+					leftOnlyCells := make(map[*game.Cell]struct{})
+					for cell := range intersectingObs.cells {
+						if _, isShared := sharedCells[cell]; !isShared {
+							leftOnlyCells[cell] = struct{}{}
+						}
+					}
+
+					occludedMines := intersectingObs.numMines - observation.numMines
+
+					if occludedMines == len(leftOnlyCells) {
+						occludedObs := Observation{
+							numMines: occludedMines,
+							cells:    leftOnlyCells,
+						}
+
+						director.addObservation(&occludedObs)
+					}
 				}
 			}
 		}
 	}
 }
 
-func (director *Director) CellRevealed(cell *game.Cell) {
+func (director *Director) addObservation(observation *Observation) {
+	// Don't add vacuous observations
+	if len(observation.cells) == 0 {
+		return
+	}
+
+	dupeVisited := make(map[*Observation]struct{})
+	for cell := range observation.cells {
+		var cellObservations map[*Observation]struct{}
+		var exists bool
+		if cellObservations, exists = director.observationsByCell[cell]; !exists {
+			cellObservations = make(map[*Observation]struct{})
+			director.observationsByCell[cell] = cellObservations
+		}
+
+		for otherObs := range cellObservations {
+			if _, hasVisited := dupeVisited[otherObs]; hasVisited {
+				continue
+			}
+			dupeVisited[otherObs] = struct{}{}
+
+			// Don't add duplicates
+			if reflect.DeepEqual(observation.cells, otherObs.cells) {
+				return
+			}
+		}
+
+		cellObservations[observation] = struct{}{}
+	}
+
+	director.observations[observation] = struct{}{}
+}
+
+func (director *Director) removeObservation(observation *Observation) {
+	delete(director.observations, observation)
+
+	for cell := range observation.cells {
+		delete(director.observationsByCell[cell], observation)
+	}
+}
+
+func (director *Director) removeObservationCell(observation *Observation, cell *game.Cell) {
+	delete(observation.cells, cell)
+	delete(director.observationsByCell[cell], observation)
+}
+
+func (director *Director) cellRevealed(cell *game.Cell) {
 	observation := Observation{
 		origin:   cell,
 		numMines: int(cell.NumMines()),
@@ -131,17 +337,7 @@ func (director *Director) CellRevealed(cell *game.Cell) {
 	director.observationsLock.Lock()
 	defer director.observationsLock.Unlock()
 
-	director.observations[&observation] = struct{}{}
-	for cell := range observation.cells {
-		var cellObservations map[*Observation]struct{}
-		var exists bool
-		if cellObservations, exists = director.observationsByCell[cell]; !exists {
-			cellObservations = make(map[*Observation]struct{})
-			director.observationsByCell[cell] = cellObservations
-		}
-
-		cellObservations[&observation] = struct{}{}
-	}
+	director.addObservation(&observation)
 
 	//XXX///////////////////////////////////////////////////////////////////////////////////////////
 	//fmt.Fprintf(os.Stdout,

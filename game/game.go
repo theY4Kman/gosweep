@@ -66,11 +66,17 @@ func Run(config GameConfig) {
 	batch := pixel.NewBatch(&pixel.TrianglesData{}, spritesheet)
 
 	topLeft := win.Bounds().Vertices()[1]
+	topRight := win.Bounds().Max
 	boardTopLeft := topLeft.Sub(pixel.V(0, float64(headerHeight)))
 
-	scoreAtlas := text.NewAtlas(basicfont.Face7x13, text.ASCII)
-	scoreText := text.New(topLeft.Add(pixel.V(20, -30)), scoreAtlas)
+	basicAtlas := text.NewAtlas(basicfont.Face7x13, text.ASCII)
+
+	scoreText := text.New(topLeft.Add(pixel.V(20, -30)), basicAtlas)
 	scoreText.Color = colornames.Black
+
+	cellPosText := text.New(topRight.Add(pixel.V(-60, -30)), basicAtlas)
+	cellPosText.Color = colornames.Darkcyan
+	var hoveredCell *Cell
 
 	board := config.createBoard()
 	board.startGame()
@@ -80,7 +86,7 @@ func Run(config GameConfig) {
 		second = time.Tick(time.Second)
 	)
 
-	bgColor := colornames.Lightgray
+	bgColor := colornames.Gainsboro
 	for !win.Closed() {
 		win.Update()
 		win.Clear(bgColor)
@@ -111,6 +117,19 @@ func Run(config GameConfig) {
 		}
 		scoreText.Draw(win, pixel.IM)
 
+		if win.MouseInsideWindow() {
+			x, y := board.screenToGridCoords(win.MousePosition())
+			hoveredCell = board.CellAt(x, y)
+		} else {
+			hoveredCell = nil
+		}
+
+		cellPosText.Clear()
+		if hoveredCell != nil {
+			fmt.Fprintf(cellPosText, "(%d, %d)", hoveredCell.x, hoveredCell.y)
+			cellPosText.Draw(win, pixel.IM)
+		}
+
 		batch.Clear()
 		for y, row := range board.cells {
 			rowStart := boardTopLeft.Add(pixel.V(cellWidth/2, -float64(cellWidth/2+cellWidth*y)))
@@ -133,15 +152,17 @@ func Run(config GameConfig) {
 			board.directorAnnotationLock.Lock()
 			for cellAction, expiresAt := range board.directorAnnotations {
 				if now.After(expiresAt) {
-					delete(board.directorAnnotations, cellAction)
-					continue
+					if board.state == Ongoing || board.state == Won {
+						delete(board.directorAnnotations, cellAction)
+						continue
+					}
 				}
 
 				cell := cellAction.cell
 				start := boardTopLeft.Add(
 					pixel.V(
 						float64(cellWidth*cell.x),
-						-float64(cellWidth*cell.y),
+						-float64(cellWidth*(cell.y+1)),
 					),
 				)
 				end := start.Add(pixel.V(cellWidth, cellWidth))
@@ -175,18 +196,15 @@ func Run(config GameConfig) {
 		}
 
 		if win.JustPressed(pixelgl.MouseButtonLeft) || win.JustPressed(pixelgl.MouseButtonRight) || win.JustPressed(pixelgl.MouseButtonMiddle) {
-			x, y := board.screenToGridCoords(win.MousePosition())
-			cell := board.CellAt(x, y)
-
-			if cell != nil {
+			if hoveredCell != nil {
 				if win.JustPressed(pixelgl.MouseButtonLeft) {
-					cell.click()
+					hoveredCell.click()
 				}
 				if win.JustPressed(pixelgl.MouseButtonRight) {
-					cell.rightClick()
+					hoveredCell.rightClick()
 				}
 				if win.JustPressed(pixelgl.MouseButtonMiddle) {
-					cell.middleClick()
+					hoveredCell.middleClick()
 				}
 			}
 		}

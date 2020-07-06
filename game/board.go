@@ -249,9 +249,11 @@ func createBoard(width uint, height uint, numMines uint, mode GameMode, director
 					return
 				}
 
-				close(board.directorCellChanges)
-				board.director.CellChanges(board.directorCellChanges)
+				cellChanges := board.directorCellChanges
 				board.directorCellChanges = make(chan *Cell, board.NumCells())
+
+				close(cellChanges)
+				board.director.CellChanges(cellChanges)
 
 				actions := make(chan CellAction, board.NumCells())
 				go board.director.Act(actions)
@@ -260,7 +262,7 @@ func createBoard(width uint, height uint, numMines uint, mode GameMode, director
 				board.directorAnnotationLock.Lock()
 				for cellAction := range actions {
 					dedupedActions[cellAction] = struct{}{}
-					board.directorAnnotations[cellAction] = time.Now().Add(200 * time.Millisecond)
+					board.directorAnnotations[cellAction] = time.Now().Add(100 * time.Millisecond)
 				}
 				board.directorAnnotationLock.Unlock()
 
