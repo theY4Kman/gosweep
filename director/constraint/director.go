@@ -68,28 +68,35 @@ func (director *Director) Init(board *game.Board) {
 
 	go func() {
 		for actions := range director.act {
-			if !director.hasActed {
-				director.actRandom(actions)
-				director.hasActed = true
-			} else {
-				deliberateActions := make(chan game.CellAction)
+			actors := []func(actions chan<- game.CellAction){
+				director.actDeliberate,
+				director.actLowestProbability,
+				director.actRandom,
+			}
 
+			for _, actor := range actors {
+				actorActions := make(chan game.CellAction)
+				foundAction := false
+
+				wg := sync.WaitGroup{}
+				wg.Add(1)
 				go func() {
-					foundAction := false
-					for cellAction := range deliberateActions {
+					for cellAction := range actorActions {
 						foundAction = true
 						actions <- cellAction
 					}
-
-					if !foundAction {
-						director.actLowestProbability(actions)
-					} else {
-						close(actions)
-					}
+					wg.Done()
 				}()
 
-				director.actDeliberate(deliberateActions)
+				actor(actorActions)
+				wg.Wait()
+
+				if foundAction {
+					break
+				}
 			}
+
+			close(actions)
 		}
 	}()
 }
