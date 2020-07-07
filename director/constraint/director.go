@@ -173,7 +173,9 @@ func (director *Director) actDeliberate(actions chan<- game.CellAction) {
 }
 
 func (director *Director) Act(actions chan<- game.CellAction) {
-	director.act <- actions
+	if director.act != nil {
+		director.act <- actions
+	}
 }
 
 func (director *Director) CellChanges(changes <-chan *game.Cell) {
@@ -347,5 +349,7 @@ func (director *Director) cellRevealed(cell *game.Cell) {
 }
 
 func (director *Director) End() {
-	close(director.act)
+	act := director.act
+	director.act = nil
+	close(act)
 }
