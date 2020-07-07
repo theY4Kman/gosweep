@@ -160,7 +160,6 @@ func Run(config GameConfig) {
 				isFromLatestFrame := annotation.frame == board.directorFrame
 
 				if timeShown > annotationDuration && !isFromLatestFrame {
-					fmt.Printf("frame: %8d  directorFrame: %d\n", annotation.frame, board.directorFrame)
 					delete(board.directorAnnotations, annotation)
 					continue
 				}
