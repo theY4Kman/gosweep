@@ -81,6 +81,11 @@ func Run(config GameConfig) {
 	board := config.createBoard()
 	board.startGame()
 
+	// Transparency of annotations when first displayed
+	annotationBaseAlpha := 0.5
+	// Total time an annotation will be displayed
+	annotationDuration := 200 * time.Millisecond
+
 	var (
 		frames = 0
 		second = time.Tick(time.Second)
@@ -150,15 +155,17 @@ func Run(config GameConfig) {
 
 			now := time.Now()
 			board.directorAnnotationLock.Lock()
-			for cellAction, expiresAt := range board.directorAnnotations {
-				if now.After(expiresAt) {
-					if board.state == Ongoing || board.state == Won {
-						delete(board.directorAnnotations, cellAction)
-						continue
-					}
+			for annotation := range board.directorAnnotations {
+				timeShown := now.Sub(annotation.firstShown)
+				isFromLatestFrame := annotation.frame == board.directorFrame
+
+				if timeShown > annotationDuration && !isFromLatestFrame {
+					fmt.Printf("frame: %8d  directorFrame: %d\n", annotation.frame, board.directorFrame)
+					delete(board.directorAnnotations, annotation)
+					continue
 				}
 
-				cell := cellAction.cell
+				cell := annotation.Cell
 				start := boardTopLeft.Add(
 					pixel.V(
 						float64(cellWidth*cell.x),
@@ -168,7 +175,7 @@ func Run(config GameConfig) {
 				end := start.Add(pixel.V(cellWidth, cellWidth))
 				baseColor := pixel.Alpha(0)
 
-				switch cellAction.action {
+				switch annotation.Action {
 				case Click:
 					baseColor = pixel.RGB(1, 0, 0)
 				case RightClick:
@@ -177,7 +184,14 @@ func Run(config GameConfig) {
 					baseColor = pixel.RGB(0, 1, 0)
 				}
 
-				imd.Color = baseColor.Mul(pixel.Alpha(0.5))
+				alpha := annotationBaseAlpha
+				if !isFromLatestFrame {
+					progress := 1 - float64(timeShown) / float64(annotationDuration)
+					alphaMultiplier := InOutCubic(progress)
+					alpha *= alphaMultiplier
+				}
+
+				imd.Color = baseColor.Mul(pixel.Alpha(alpha))
 				imd.Push(start, end)
 				imd.Rectangle(0)  // 0 = filled
 			}
@@ -208,6 +222,16 @@ func Run(config GameConfig) {
 				}
 			}
 		}
+	}
+}
+
+func InOutCubic(t float64) float64 {
+	t *= 2
+	if t < 1 {
+		return 0.5 * t * t * t
+	} else {
+		t -= 2
+		return 0.5 * (t*t*t + 2)
 	}
 }
 

@@ -23,13 +23,22 @@ type Board struct {
 	actionGroup sync.WaitGroup
 
 	director             Director
+	directorFrame        int64
 	directorAct          chan struct{}
 	directorStop         chan struct{}
 	directorActRequested *sync.Cond
 	directorCellChanges  chan *Cell
 
-	directorAnnotations    map[CellAction]time.Time
+	directorAnnotations    map[Annotation]struct{}
 	directorAnnotationLock sync.Mutex
+}
+
+type Annotation struct {
+	Action Action
+	Cell *Cell
+
+	frame int64
+	firstShown time.Time
 }
 
 func (board *Board) Width() uint {
@@ -231,7 +240,7 @@ func createBoard(width uint, height uint, numMines uint, mode GameMode, director
 		board.directorStop = make(chan struct{})
 		board.directorActRequested = sync.NewCond(&sync.Mutex{})
 		board.directorCellChanges = make(chan *Cell, board.NumCells())
-		board.directorAnnotations = make(map[CellAction]time.Time)
+		board.directorAnnotations = make(map[Annotation]struct{})
 		board.directorAnnotationLock = sync.Mutex{}
 
 		go func() {
@@ -256,13 +265,21 @@ func createBoard(width uint, height uint, numMines uint, mode GameMode, director
 				board.director.CellChanges(cellChanges)
 
 				actions := make(chan CellAction, board.NumCells())
+				board.directorFrame++
 				go board.director.Act(actions)
 
 				dedupedActions := make(map[CellAction]struct{})
 				board.directorAnnotationLock.Lock()
 				for cellAction := range actions {
 					dedupedActions[cellAction] = struct{}{}
-					board.directorAnnotations[cellAction] = time.Now().Add(100 * time.Millisecond)
+
+					annotation := Annotation{
+						Action:     cellAction.action,
+						Cell:       cellAction.cell,
+						frame:      board.directorFrame,
+						firstShown: time.Now(),
+					}
+					board.directorAnnotations[annotation] = struct{}{}
 				}
 				board.directorAnnotationLock.Unlock()
 
