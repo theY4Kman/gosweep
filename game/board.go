@@ -33,14 +33,6 @@ type Board struct {
 	directorAnnotationLock sync.Mutex
 }
 
-type Annotation struct {
-	Action Action
-	Cell *Cell
-
-	frame int64
-	firstShown time.Time
-}
-
 func (board *Board) Width() uint {
 	return board.width
 }
@@ -90,6 +82,23 @@ func (board *Board) RequestDirectorAct() {
 	if board.directorActRequested != nil {
 		board.directorActRequested.Broadcast()
 	}
+}
+
+func (board *Board) AddAnnotation(annotation Annotation) {
+	annotations := make(chan Annotation, 1)
+	annotations <- annotation
+	close(annotations)
+	board.AddAnnotations(annotations)
+}
+
+func (board *Board) AddAnnotations(annotations <-chan Annotation) {
+	board.directorAnnotationLock.Lock()
+	for annotation := range annotations {
+		annotation.frame = board.directorFrame
+		annotation.firstShown = time.Now()
+		board.directorAnnotations[annotation] = struct{}{}
+	}
+	board.directorAnnotationLock.Unlock()
 }
 
 func (board *Board) screenToGridCoords(pos pixel.Vec) (uint, uint) {
@@ -269,23 +278,23 @@ func createBoard(width uint, height uint, numMines uint, mode GameMode, director
 				go board.director.Act(actions)
 
 				dedupedActions := make(map[CellAction]struct{})
-				board.directorAnnotationLock.Lock()
 				for cellAction := range actions {
 					dedupedActions[cellAction] = struct{}{}
+				}
 
+				board.directorAnnotationLock.Lock()
+				for cellAction := range dedupedActions {
 					annotation := Annotation{
-						Action:     cellAction.action,
+						Type:       AnnotationType(cellAction.action),
 						Cell:       cellAction.cell,
 						frame:      board.directorFrame,
 						firstShown: time.Now(),
 					}
 					board.directorAnnotations[annotation] = struct{}{}
-				}
-				board.directorAnnotationLock.Unlock()
 
-				for cellAction := range dedupedActions {
 					cellAction.perform()
 				}
+				board.directorAnnotationLock.Unlock()
 
 				board.directorActRequested.L.Unlock()
 			}

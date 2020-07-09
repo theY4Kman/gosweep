@@ -5,6 +5,7 @@ import (
 	"github.com/they4kman/gosweep/director/random"
 	"github.com/they4kman/gosweep/game"
 	"math"
+	"math/rand"
 	"reflect"
 	"strings"
 	"sync"
@@ -110,27 +111,49 @@ func (director *Director) actRandom(actions chan<- game.CellAction) {
 
 func (director *Director) actLowestProbability(actions chan<- game.CellAction) {
 	lowestProbability := float32(math.Inf(1))
-	var lowestProbabilityCell *game.Cell
+	numLowestProbabilityCells := 0
 
 	cellProbabilities := make(map[*game.Cell]float32)
 	for observation := range director.observations {
 		probability := observation.MineProbability()
 
 		for cell := range observation.cells {
+			if probability < lowestProbability {
+				lowestProbability = probability
+				numLowestProbabilityCells = 0
+			}
+
 			pastProbability, hasPastProbability := cellProbabilities[cell]
 			if !hasPastProbability || probability < pastProbability {
 				cellProbabilities[cell] = probability
 			}
 
-			if probability < lowestProbability {
-				lowestProbability = probability
-				lowestProbabilityCell = cell
+			if probability <= lowestProbability && probability != pastProbability {
+				numLowestProbabilityCells++
 			}
 		}
 	}
 
-	if lowestProbabilityCell != nil {
-		actions <- lowestProbabilityCell.Click()
+	if len(cellProbabilities) > 0 {
+		lowestProbabilityCells := make([]*game.Cell, numLowestProbabilityCells)
+		i := 0
+		for cell, probability := range cellProbabilities {
+			if probability <= lowestProbability {
+				lowestProbabilityCells[i] = cell
+				i++
+
+				director.board.AddAnnotation(game.Annotation{
+					Type: game.AnnotateHighlightYellow,
+					Cell: cell,
+				})
+			}
+		}
+
+		rand.Shuffle(len(lowestProbabilityCells), func(i, j int) {
+			lowestProbabilityCells[i], lowestProbabilityCells[j] = lowestProbabilityCells[j], lowestProbabilityCells[i]
+		})
+
+		actions <- lowestProbabilityCells[0].Click()
 	}
 
 	close(actions)

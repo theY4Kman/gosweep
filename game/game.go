@@ -174,13 +174,15 @@ func Run(config GameConfig) {
 				end := start.Add(pixel.V(cellWidth, cellWidth))
 				baseColor := pixel.Alpha(0)
 
-				switch annotation.Action {
-				case Click:
+				switch annotation.Type {
+				case AnnotateClick:
 					baseColor = pixel.RGB(1, 0, 0)
-				case RightClick:
+				case AnnotateRightClick:
 					baseColor = pixel.RGB(0, 0, 1)
-				case MiddleClick:
+				case AnnotateMiddleClick:
 					baseColor = pixel.RGB(0, 1, 0)
+				case AnnotateHighlightYellow:
+					baseColor = pixel.RGB(1, 1, 0)
 				}
 
 				alpha := annotationBaseAlpha

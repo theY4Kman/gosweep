@@ -27,6 +27,23 @@ func (cellAction CellAction) perform() {
 	}
 }
 
+type AnnotationType int
+
+const (
+	AnnotateClick = AnnotationType(Click)
+	AnnotateMiddleClick = AnnotationType(MiddleClick)
+	AnnotateRightClick = AnnotationType(RightClick)
+	AnnotateHighlightYellow = iota
+)
+
+type Annotation struct {
+	Type AnnotationType
+	Cell *Cell
+
+	frame int64
+	firstShown time.Time
+}
+
 type Director interface {
 	// Initialize the director
 	Init(*Board)
