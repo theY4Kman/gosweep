@@ -2,6 +2,7 @@ package game
 
 import (
 	"github.com/faiface/pixel"
+	"github.com/gammazero/deque"
 	"math/rand"
 	"sync"
 	"sync/atomic"
@@ -29,8 +30,7 @@ type Board struct {
 	directorActRequested *sync.Cond
 	directorCellChanges  chan *Cell
 
-	directorAnnotations    map[Annotation]struct{}
-	directorAnnotationLock sync.Mutex
+	directorAnnotations    deque.Deque
 }
 
 func (board *Board) Width() uint {
@@ -92,13 +92,11 @@ func (board *Board) AddAnnotation(annotation Annotation) {
 }
 
 func (board *Board) AddAnnotations(annotations <-chan Annotation) {
-	board.directorAnnotationLock.Lock()
 	for annotation := range annotations {
 		annotation.frame = board.directorFrame
 		annotation.firstShown = time.Now()
-		board.directorAnnotations[annotation] = struct{}{}
+		board.directorAnnotations.PushBack(annotation)
 	}
-	board.directorAnnotationLock.Unlock()
 }
 
 func (board *Board) screenToGridCoords(pos pixel.Vec) (uint, uint) {
@@ -249,8 +247,6 @@ func createBoard(width uint, height uint, numMines uint, mode GameMode, director
 		board.directorStop = make(chan struct{})
 		board.directorActRequested = sync.NewCond(&sync.Mutex{})
 		board.directorCellChanges = make(chan *Cell, board.NumCells())
-		board.directorAnnotations = make(map[Annotation]struct{})
-		board.directorAnnotationLock = sync.Mutex{}
 
 		go func() {
 			for range board.directorAct {
@@ -282,7 +278,6 @@ func createBoard(width uint, height uint, numMines uint, mode GameMode, director
 					dedupedActions[cellAction] = struct{}{}
 				}
 
-				board.directorAnnotationLock.Lock()
 				for cellAction := range dedupedActions {
 					annotation := Annotation{
 						Type:       AnnotationType(cellAction.action),
@@ -290,11 +285,10 @@ func createBoard(width uint, height uint, numMines uint, mode GameMode, director
 						frame:      board.directorFrame,
 						firstShown: time.Now(),
 					}
-					board.directorAnnotations[annotation] = struct{}{}
+					board.directorAnnotations.PushBack(annotation)
 
 					cellAction.perform()
 				}
-				board.directorAnnotationLock.Unlock()
 
 				board.directorActRequested.L.Unlock()
 			}

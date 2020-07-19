@@ -152,17 +152,22 @@ func Run(config GameConfig) {
 		}
 		batch.Draw(win)
 
-		if board.directorAnnotations != nil {
+		if board.directorAnnotations.Len() > 0 {
 			imd := imdraw.New(nil)
 
 			now := time.Now()
-			board.directorAnnotationLock.Lock()
-			for annotation := range board.directorAnnotations {
+			for i := 0; i < board.directorAnnotations.Len(); i++ {
+				el := board.directorAnnotations.At(i)
+				if el == nil {
+					continue
+				}
+				annotation := el.(Annotation)
+
 				timeShown := now.Sub(annotation.firstShown)
 				isFromLatestFrame := annotation.frame == board.directorFrame
 
 				if timeShown > config.AnnotationDuration && !isFromLatestFrame {
-					delete(board.directorAnnotations, annotation)
+					board.directorAnnotations.PopFront()
 					continue
 				}
 
@@ -199,7 +204,6 @@ func Run(config GameConfig) {
 				imd.Rectangle(0)  // 0 = filled
 			}
 
-			board.directorAnnotationLock.Unlock()
 			imd.Draw(win)
 		}
 
