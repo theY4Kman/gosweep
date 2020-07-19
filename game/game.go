@@ -31,6 +31,11 @@ type GameConfig struct {
 	Mode          GameMode
 
 	Director Director
+
+	// Transparency of annotations when first displayed
+	AnnotationBaseAlpha float64
+	// Total time an annotation will be displayed
+	AnnotationDuration time.Duration
 }
 
 func NewGameConfig() GameConfig {
@@ -40,6 +45,8 @@ func NewGameConfig() GameConfig {
 		NumMines: 99,
 		Mode: Classic,
 		Director: nil,
+		AnnotationBaseAlpha: 0.5,
+		AnnotationDuration: 200 * time.Millisecond,
 	}
 }
 
@@ -80,11 +87,6 @@ func Run(config GameConfig) {
 
 	board := config.createBoard()
 	board.startGame()
-
-	// Transparency of annotations when first displayed
-	annotationBaseAlpha := 0.5
-	// Total time an annotation will be displayed
-	annotationDuration := 200 * time.Millisecond
 
 	var (
 		frames = 0
@@ -159,7 +161,7 @@ func Run(config GameConfig) {
 				timeShown := now.Sub(annotation.firstShown)
 				isFromLatestFrame := annotation.frame == board.directorFrame
 
-				if timeShown > annotationDuration && !isFromLatestFrame {
+				if timeShown > config.AnnotationDuration && !isFromLatestFrame {
 					delete(board.directorAnnotations, annotation)
 					continue
 				}
@@ -185,9 +187,9 @@ func Run(config GameConfig) {
 					baseColor = pixel.RGB(1, 1, 0)
 				}
 
-				alpha := annotationBaseAlpha
+				alpha := config.AnnotationBaseAlpha
 				if !isFromLatestFrame {
-					progress := 1 - float64(timeShown) / float64(annotationDuration)
+					progress := 1 - float64(timeShown) / float64(config.AnnotationDuration)
 					alphaMultiplier := InOutCubic(progress)
 					alpha *= alphaMultiplier
 				}
