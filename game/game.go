@@ -7,6 +7,7 @@ import (
 	"golang.org/x/image/font/basicfont"
 	"image"
 	"os"
+	"strings"
 	"time"
 
 	_ "image/png"
@@ -30,28 +31,118 @@ type GameConfig struct {
 	NumMines      uint
 	Mode          GameMode
 
+	Seed int64
+
+	// Snapshot to load board configuration from
+	Snapshot *BoardSnapshot
+	// Whether to set all cells as unrevealed when loading the Snapshot
+	LoadSnapshotFresh bool
+
 	Director Director
 
 	// Transparency of annotations when first displayed
 	AnnotationBaseAlpha float64
 	// Total time an annotation will be displayed
 	AnnotationDuration time.Duration
+
+	// Path to directory where final snapshots of boards should be saved
+	SavedSnapshotsDir string
 }
 
 func NewGameConfig() GameConfig {
 	return GameConfig{
-		Width:    30,
-		Height:   16,
-		NumMines: 99,
-		Mode: Classic,
-		Director: nil,
+		Width:               30,
+		Height:              16,
+		NumMines:            99,
+		Mode:                Classic,
+		Director:            nil,
 		AnnotationBaseAlpha: 0.5,
-		AnnotationDuration: 200 * time.Millisecond,
+		AnnotationDuration:  200 * time.Millisecond,
 	}
 }
 
 func (config GameConfig) createBoard() *Board {
-	return createBoard(config.Width, config.Height, config.NumMines, config.Mode, config.Director)
+	if config.Snapshot == nil {
+		return createFilledBoard(boardConfig{
+			Width:     config.Width,
+			Height:    config.Height,
+			NumMines:  config.NumMines,
+			Mode:      config.Mode,
+			Seed:      config.Seed,
+			Director:  config.Director,
+			OnGameEnd: config.onGameEnd,
+		})
+	} else {
+		return config.Snapshot.CreateBoard(
+			boardConfig{
+				Mode:      config.Mode,
+				Director:  config.Director,
+				OnGameEnd: config.onGameEnd,
+			},
+			config.LoadSnapshotFresh,
+		)
+	}
+}
+
+func (config GameConfig) onGameEnd(board *Board) {
+	config.saveSnapshot(board)
+}
+
+func (config GameConfig) saveSnapshot(board *Board) {
+	if config.SavedSnapshotsDir != "" {
+		stat, err := os.Stat(config.SavedSnapshotsDir)
+		if err != nil {
+			if os.IsNotExist(err) {
+				if err := os.MkdirAll(config.SavedSnapshotsDir, 0777); err != nil {
+					fmt.Println(err)
+					return
+				}
+			} else {
+				fmt.Println(err)
+				return
+			}
+		} else if !stat.Mode().IsDir() {
+			fmt.Printf("%s is not a directory; cannot save snapshots to it.", config.SavedSnapshotsDir)
+			return
+		}
+
+		filename := config.generateReplayFilename(board, time.Now())
+		path := strings.Join([]string{config.SavedSnapshotsDir, filename}, string(os.PathSeparator))
+
+		// TODO: prevent duplicate filenames
+		file, err := os.Create(path)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		snapshot := board.snapshot()
+		if _, err := file.WriteString(snapshot.Serialize()); err != nil {
+			fmt.Println(err)
+			return
+		}
+	}
+}
+
+func (config GameConfig) generateReplayFilename(board *Board, t time.Time) string {
+	filenameBuilder := strings.Builder{}
+
+	filenameBuilder.WriteString(t.Format("20060102_150405_"))
+
+	var stateStr string
+	switch board.state {
+	case Won:
+		stateStr = "win"
+	case Lost:
+		stateStr = "loss"
+	default:
+		stateStr = "other"
+	}
+	filenameBuilder.WriteString(stateStr)
+
+	filenameBuilder.WriteString(".yaml")
+
+	return filenameBuilder.String()
 }
 
 func Run(config GameConfig) {
@@ -72,21 +163,37 @@ func Run(config GameConfig) {
 	spritesheet := loadSpritesheet()
 	batch := pixel.NewBatch(&pixel.TrianglesData{}, spritesheet)
 
-	topLeft := win.Bounds().Vertices()[1]
-	topRight := win.Bounds().Max
-	boardTopLeft := topLeft.Sub(pixel.V(0, float64(headerHeight)))
+	var boardTopLeft pixel.Vec
 
 	basicAtlas := text.NewAtlas(basicfont.Face7x13, text.ASCII)
-
-	scoreText := text.New(topLeft.Add(pixel.V(20, -30)), basicAtlas)
-	scoreText.Color = colornames.Black
-
-	cellPosText := text.New(topRight.Add(pixel.V(-60, -30)), basicAtlas)
-	cellPosText.Color = colornames.Darkcyan
+	var scoreText *text.Text
+	var cellPosText *text.Text
 	var hoveredCell *Cell
 
-	board := config.createBoard()
-	board.startGame()
+	var board *Board
+	resetBoard := func() {
+		board = config.createBoard()
+		board.startGame()
+
+		win.SetBounds(
+			pixel.R(
+				0, 0,
+				float64(board.width*cellWidth), float64(board.height*cellWidth+headerHeight),
+			),
+		)
+
+		topLeft := win.Bounds().Vertices()[1]
+		topRight := win.Bounds().Max
+		boardTopLeft = topLeft.Sub(pixel.V(0, float64(headerHeight)))
+
+		scoreText = text.New(topLeft.Add(pixel.V(20, -30)), basicAtlas)
+		scoreText.Color = colornames.Black
+
+		cellPosText = text.New(topRight.Add(pixel.V(-60, -30)), basicAtlas)
+		cellPosText.Color = colornames.Darkcyan
+	}
+
+	resetBoard()
 
 	var (
 		frames = 0
@@ -194,14 +301,14 @@ func Run(config GameConfig) {
 
 				alpha := config.AnnotationBaseAlpha
 				if !isFromLatestFrame {
-					progress := 1 - float64(timeShown) / float64(config.AnnotationDuration)
+					progress := 1 - float64(timeShown)/float64(config.AnnotationDuration)
 					alphaMultiplier := InOutCubic(progress)
 					alpha *= alphaMultiplier
 				}
 
 				imd.Color = baseColor.Mul(pixel.Alpha(alpha))
 				imd.Push(start, end)
-				imd.Rectangle(0)  // 0 = filled
+				imd.Rectangle(0) // 0 = filled
 			}
 
 			imd.Draw(win)
@@ -209,8 +316,8 @@ func Run(config GameConfig) {
 
 		if !board.canPlay() {
 			if win.JustPressed(pixelgl.KeyEnter) {
-				board = config.createBoard()
-				board.startGame()
+				config.Seed = board.rand.Int63()
+				resetBoard()
 			}
 
 			continue

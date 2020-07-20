@@ -30,9 +30,9 @@ func (cellAction CellAction) perform() {
 type AnnotationType int
 
 const (
-	AnnotateClick = AnnotationType(Click)
-	AnnotateMiddleClick = AnnotationType(MiddleClick)
-	AnnotateRightClick = AnnotationType(RightClick)
+	AnnotateClick           = AnnotationType(Click)
+	AnnotateMiddleClick     = AnnotationType(MiddleClick)
+	AnnotateRightClick      = AnnotationType(RightClick)
 	AnnotateHighlightYellow = iota
 )
 
@@ -40,7 +40,7 @@ type Annotation struct {
 	Type AnnotationType
 	Cell *Cell
 
-	frame int64
+	frame      int64
 	firstShown time.Time
 }
 
@@ -64,7 +64,7 @@ type Director interface {
 	End()
 }
 
-type BaseDirector struct {}
+type BaseDirector struct{}
 
 func (director *BaseDirector) Init(*Board) {
 }
@@ -78,9 +78,9 @@ func (director *BaseDirector) ActContinuously(act chan<- struct{}, done <-chan s
 
 		for {
 			select {
-			case <- done:
+			case <-done:
 				return
-			case <- tick:
+			case <-tick:
 				act <- struct{}{}
 			default:
 			}

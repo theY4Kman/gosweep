@@ -1,4 +1,3 @@
-
 package cmd
 
 import (
@@ -7,13 +6,15 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/they4kman/gosweep/director/constraint"
 	"github.com/they4kman/gosweep/game"
-	"math/rand"
+	"io/ioutil"
 	"os"
 	"time"
 )
 
 var gameConfig = game.NewGameConfig()
 var useDirector = false
+var savedSnapshotsDir string
+var snapshotToLoad string
 
 var rootCmd = &cobra.Command{
 	Use:   "gosweep",
@@ -27,14 +28,57 @@ Run with no arguments to play manually
 Use the director flag to make the computer play for you
 	gosweep -director
 `,
-	Run: func(cmd *cobra.Command, args []string) {
-		// TODO: allow customization of seed by command-line
-		rand.Seed(time.Now().UnixNano())
-
+	PreRunE: func(cmd *cobra.Command, args []string) error {
 		if useDirector {
 			gameConfig.Director = &constraint.Director{}
 		}
 
+		if !cmd.Flag("seed").Changed {
+			gameConfig.Seed = time.Now().UnixNano()
+		}
+
+		if savedSnapshotsDir != "" {
+			stat, err := os.Stat(savedSnapshotsDir)
+			if err != nil {
+				if !os.IsNotExist(err) {
+					return err
+				}
+			} else if !stat.Mode().IsDir() {
+				return fmt.Errorf("%s is not a directory; cannot save snapshots to it", savedSnapshotsDir)
+			}
+
+			gameConfig.SavedSnapshotsDir = savedSnapshotsDir
+		}
+
+		if snapshotToLoad != "" {
+			stat, err := os.Stat(snapshotToLoad)
+			if err != nil {
+				return err
+			} else if !stat.Mode().IsRegular() {
+				return fmt.Errorf("%s is not a valid file", snapshotToLoad)
+			}
+
+			file, err := os.Open(snapshotToLoad)
+			if err != nil {
+				return err
+			}
+
+			bytes, err := ioutil.ReadAll(file)
+			if err != nil {
+				return err
+			}
+
+			var snapshot *game.BoardSnapshot
+			if snapshot, err = game.LoadSnapshot(string(bytes)); err != nil {
+				return err
+			}
+
+			gameConfig.Snapshot = snapshot
+		}
+
+		return nil
+	},
+	Run: func(cmd *cobra.Command, args []string) {
 		pixelgl.Run(func() {
 			game.Run(gameConfig)
 		})
@@ -56,7 +100,7 @@ func newGameModeValue(val game.GameMode, p *game.GameMode) *gameModeValue {
 }
 
 var gameModes = map[string]game.GameMode{
-	"win7": game.Win7,
+	"win7":    game.Win7,
 	"classic": game.Classic,
 }
 
@@ -94,4 +138,9 @@ func init() {
 win7: all cells surrounding the first-clicked cell are cleared of mines (first click never loses)
 classic: mines are left as is (first click can lose the game)`)
 	rootCmd.Flags().BoolVarP(&useDirector, "director", "d", false, "Make the computer play")
+	rootCmd.Flags().Int64Var(&gameConfig.Seed, "seed", 1, "Initial seed to feed into random number generator")
+
+	rootCmd.Flags().StringVar(&savedSnapshotsDir, "save-snapshots-to", "", "Directory to save endgame board snapshots to")
+	rootCmd.Flags().StringVar(&snapshotToLoad, "load", "", "Board snapshot to load and play")
+	rootCmd.Flags().BoolVar(&gameConfig.LoadSnapshotFresh, "load-fresh", true, "Whether to load the specified snapshot completely unrevealed")
 }

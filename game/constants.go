@@ -21,7 +21,7 @@ const (
 	MineLosing
 )
 
-var CellStates = []CellState {
+var CellStates = []CellState{
 	Unrevealed,
 	Empty,
 	Number1,
@@ -40,7 +40,7 @@ var CellStates = []CellState {
 }
 
 const (
-	cellWidth    = 16
+	cellWidth = 16
 )
 
 const (

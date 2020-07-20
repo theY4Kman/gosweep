@@ -2,13 +2,12 @@ package random
 
 import (
 	"github.com/they4kman/gosweep/game"
-	"math/rand"
 )
 
 type Director struct {
 	game.BaseDirector
 
-	act   chan chan<- game.CellAction
+	act chan chan<- game.CellAction
 }
 
 func (director *Director) Init(board *game.Board) {
@@ -22,7 +21,7 @@ func (director *Director) Init(board *game.Board) {
 			i++
 		}
 
-		rand.Shuffle(len(unrevealedCells), func(i, j int) {
+		board.Rand().Shuffle(len(unrevealedCells), func(i, j int) {
 			unrevealedCells[i], unrevealedCells[j] = unrevealedCells[j], unrevealedCells[i]
 		})
 

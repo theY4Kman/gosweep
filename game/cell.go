@@ -13,6 +13,7 @@ type Cell struct {
 	numMines uint32
 
 	isMine, isRevealed, isFlagged bool
+	isLosingMine                  bool
 
 	state   CellState
 	sprite  *pixel.Sprite
@@ -21,6 +22,59 @@ type Cell struct {
 
 func (cell *Cell) String() string {
 	return fmt.Sprintf("Cell(%v, %v)", cell.x, cell.y)
+}
+
+func (cell *Cell) serialize() string {
+	switch {
+	case cell.isMine:
+		switch {
+		case cell.isLosingMine:
+			return "*"
+		case cell.isFlagged:
+			return "F"
+		default:
+			return "O"
+		}
+	case cell.isFlagged:
+		return "f"
+	case cell.isRevealed:
+		return "."
+	default:
+		return "#"
+	}
+}
+
+func (cell *Cell) deserialize(c string) bool {
+	switch c {
+	case "*", "F", "O":
+		cell.isMine = true
+
+		switch c {
+		case "*":
+			cell.isLosingMine = true
+			cell.isRevealed = true
+			cell.setState(MineLosing)
+		case "F":
+			cell.isFlagged = true
+			cell.setState(Flag)
+		default:
+			cell.setState(Unrevealed)
+		}
+	case "f":
+		cell.isFlagged = true
+		cell.setState(Flag)
+	case ".":
+		cell.isRevealed = true
+		// NOTE: this state will very likely be incorrect, until cell numbers are recalculated
+		cell.setState(Empty)
+	case "#":
+		cell.isRevealed = false
+		cell.setState(Unrevealed)
+	default:
+		return false
+	}
+
+	return true
 }
 
 func (cell *Cell) X() uint {
@@ -100,21 +154,21 @@ func (cell *Cell) SendNeighbors(out chan<- *Cell) {
 
 func (cell *Cell) Click() CellAction {
 	return CellAction{
-		cell: cell,
+		cell:   cell,
 		action: Click,
 	}
 }
 
 func (cell *Cell) RightClick() CellAction {
 	return CellAction{
-		cell: cell,
+		cell:   cell,
 		action: RightClick,
 	}
 }
 
 func (cell *Cell) MiddleClick() CellAction {
 	return CellAction{
-		cell: cell,
+		cell:   cell,
 		action: MiddleClick,
 	}
 }
@@ -194,6 +248,7 @@ func (cell *Cell) reveal() {
 
 		if cell.isMine {
 			cell.setState(MineLosing)
+			cell.isLosingMine = true
 			cell.board.lose()
 		} else {
 			cell.setState(CellState(cell.numMines))

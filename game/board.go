@@ -3,16 +3,33 @@ package game
 import (
 	"github.com/faiface/pixel"
 	"github.com/gammazero/deque"
+	"github.com/they4kman/gosweep/util/lockedRand"
 	"math/rand"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
+type boardConfig struct {
+	Width, Height uint
+	NumMines      uint
+	Mode          GameMode
+
+	Seed int64
+
+	Director Director
+
+	OnGameEnd func(*Board)
+}
+
 type Board struct {
 	width, height uint // in number of cells
 	numMines      uint
 	mode          GameMode
+
+	initialSeed int64
+	rand        *rand.Rand
 
 	state          BoardState
 	cells          [][]Cell
@@ -30,7 +47,9 @@ type Board struct {
 	directorActRequested *sync.Cond
 	directorCellChanges  chan *Cell
 
-	directorAnnotations    deque.Deque
+	directorAnnotations deque.Deque
+
+	onGameEnd func(*Board)
 }
 
 func (board *Board) Width() uint {
@@ -43,6 +62,10 @@ func (board *Board) Height() uint {
 
 func (board *Board) NumCells() uint {
 	return board.width * board.height
+}
+
+func (board *Board) Rand() *rand.Rand {
+	return board.rand
 }
 
 func (board *Board) CellAt(x, y uint) *Cell {
@@ -99,6 +122,32 @@ func (board *Board) AddAnnotations(annotations <-chan Annotation) {
 	}
 }
 
+func (board *Board) serialize() string {
+	builder := strings.Builder{}
+	builder.Grow(int(board.height*board.width + board.height))
+
+	lastY := board.height - 1
+	for y := uint(0); y < board.height; y++ {
+		for x := uint(0); x < board.width; x++ {
+			cell := board.CellAt(x, y)
+			builder.WriteString(cell.serialize())
+		}
+
+		if y != lastY {
+			builder.WriteString("\n")
+		}
+	}
+
+	return builder.String()
+}
+
+func (board *Board) snapshot() *BoardSnapshot {
+	return &BoardSnapshot{
+		Seed:            board.initialSeed,
+		SerializedBoard: board.serialize(),
+	}
+}
+
 func (board *Board) screenToGridCoords(pos pixel.Vec) (uint, uint) {
 	return uint(pos.X) / cellWidth, board.height - uint(pos.Y)/cellWidth - 1
 }
@@ -137,6 +186,10 @@ func (board *Board) endGame() {
 
 		board.director.End()
 	}
+
+	if board.onGameEnd != nil {
+		board.onGameEnd(board)
+	}
 }
 
 func (board *Board) startGame() {
@@ -170,7 +223,7 @@ func (board *Board) clearSurroundingMines(center *Cell) {
 	wg.Add(1)
 	go func() {
 		for cell := range decreaseNumMines {
-			atomic.AddUint32(&cell.numMines, ^uint32(1-1))
+			atomic.AddUint32(&cell.numMines, ^uint32(0))
 		}
 		wg.Done()
 	}()
@@ -198,7 +251,7 @@ func (board *Board) clearSurroundingMines(center *Cell) {
 		i++
 	}
 
-	rand.Shuffle(len(possibleRelocations), func(i, j int) {
+	board.rand.Shuffle(len(possibleRelocations), func(i, j int) {
 		possibleRelocations[i], possibleRelocations[j] = possibleRelocations[j], possibleRelocations[i]
 	})
 
@@ -223,15 +276,63 @@ func (board *Board) clearSurroundingMines(center *Cell) {
 	wg.Wait()
 }
 
-func createBoard(width uint, height uint, numMines uint, mode GameMode, director Director) *Board {
+func (board *Board) fillMines(cells <-chan *Cell) {
+	mineNeighborChan := make(chan *Cell, board.numMines)
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		for cell := range mineNeighborChan {
+			atomic.AddUint32(&cell.numMines, 1)
+		}
+		wg.Done()
+	}()
+
+	for cell := range cells {
+		cell.isMine = true
+		delete(board.remainingCells, cell)
+
+		cell.SendNeighbors(mineNeighborChan)
+	}
+	close(mineNeighborChan)
+
+	wg.Wait()
+}
+
+func (board *Board) randomCells(n uint) <-chan *Cell {
+	cells := make(chan *Cell, n)
+
+	numCells := board.height * board.width
+	cellIndexes := make([]uint, numCells)
+	for cellIdx := uint(0); cellIdx < numCells; cellIdx++ {
+		cellIndexes[cellIdx] = cellIdx
+	}
+
+	board.rand.Shuffle(len(cellIndexes), func(i, j int) {
+		cellIndexes[i], cellIndexes[j] = cellIndexes[j], cellIndexes[i]
+	})
+	for i := uint(0); i < board.numMines; i++ {
+		cellIdx := cellIndexes[i]
+		y, x := cellIdx/board.width, cellIdx%board.width
+		cells <- board.CellAt(x, y)
+	}
+
+	close(cells)
+	return cells
+}
+
+func createBoard(config boardConfig) *Board {
 	board := Board{
-		width:    width,
-		height:   height,
-		numMines: numMines,
-		mode:     mode,
+		width:    config.Width,
+		height:   config.Height,
+		numMines: config.NumMines,
+		mode:     config.Mode,
+
+		initialSeed: config.Seed,
+		rand:        lockedRand.NewFromSeed(config.Seed),
 
 		state:          Ongoing,
-		cells:          make([][]Cell, height),
+		cells:          make([][]Cell, config.Height),
 		hasClicked:     false,
 		numFlags:       0,
 		remainingCells: make(map[*Cell]struct{}),
@@ -239,10 +340,12 @@ func createBoard(width uint, height uint, numMines uint, mode GameMode, director
 		actionGroup: sync.WaitGroup{},
 		revelations: make(chan *Cell),
 
-		director: director,
+		director: config.Director,
+
+		onGameEnd: config.OnGameEnd,
 	}
 
-	if director != nil {
+	if config.Director != nil {
 		board.directorAct = make(chan struct{})
 		board.directorStop = make(chan struct{})
 		board.directorActRequested = sync.NewCond(&sync.Mutex{})
@@ -307,15 +410,12 @@ func createBoard(width uint, height uint, numMines uint, mode GameMode, director
 		}
 	}()
 
-	// Store cell indexes, to shuffle later and fill mines
-	cellIndexes := make([]uint, height*width)
 	cellIdx := uint(0)
-
-	for y := uint(0); y < height; y++ {
-		row := make([]Cell, width)
+	for y := uint(0); y < config.Height; y++ {
+		row := make([]Cell, config.Width)
 		board.cells[y] = row
 
-		for x := uint(0); x < width; x++ {
+		for x := uint(0); x < config.Width; x++ {
 			cell := &board.cells[y][x]
 			cell.board = &board
 			cell.idx = cellIdx
@@ -327,32 +427,15 @@ func createBoard(width uint, height uint, numMines uint, mode GameMode, director
 
 			board.remainingCells[cell] = struct{}{}
 
-			cellIndexes[cellIdx] = cellIdx
 			cellIdx++
 		}
 	}
 
-	mineNeighborChan := make(chan *Cell, numMines)
-
-	go func() {
-		for cell := range mineNeighborChan {
-			atomic.AddUint32(&cell.numMines, 1)
-		}
-	}()
-
-	rand.Shuffle(len(cellIndexes), func(i, j int) {
-		cellIndexes[i], cellIndexes[j] = cellIndexes[j], cellIndexes[i]
-	})
-	for i := uint(0); i < numMines; i++ {
-		cellIdx = cellIndexes[i]
-		y, x := cellIdx/width, cellIdx%width
-		cell := board.CellAt(x, y)
-		cell.isMine = true
-		delete(board.remainingCells, cell)
-
-		cell.SendNeighbors(mineNeighborChan)
-	}
-	close(mineNeighborChan)
-
 	return &board
+}
+
+func createFilledBoard(config boardConfig) *Board {
+	board := createBoard(config)
+	board.fillMines(board.randomCells(board.numMines))
+	return board
 }

@@ -5,7 +5,6 @@ import (
 	"github.com/they4kman/gosweep/director/random"
 	"github.com/they4kman/gosweep/game"
 	"math"
-	"math/rand"
 	"reflect"
 	"strings"
 	"sync"
@@ -149,7 +148,7 @@ func (director *Director) actLowestProbability(actions chan<- game.CellAction) {
 			}
 		}
 
-		rand.Shuffle(len(lowestProbabilityCells), func(i, j int) {
+		director.board.Rand().Shuffle(len(lowestProbabilityCells), func(i, j int) {
 			lowestProbabilityCells[i], lowestProbabilityCells[j] = lowestProbabilityCells[j], lowestProbabilityCells[i]
 		})
 
@@ -229,7 +228,7 @@ func (director *Director) CellChanges(changes <-chan *game.Cell) {
 	}
 
 	// Simplify/split observations
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 4; i++ {
 		director.simplifyObservations()
 	}
 }
