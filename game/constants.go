@@ -47,4 +47,5 @@ const (
 	Lost = iota
 	Won
 	Ongoing
+	Paused
 )

@@ -6,6 +6,7 @@ import (
 	"github.com/faiface/pixel/text"
 	"golang.org/x/image/font/basicfont"
 	"image"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -56,6 +57,8 @@ func NewGameConfig() GameConfig {
 		NumMines:            99,
 		Mode:                Classic,
 		Director:            nil,
+		Snapshot:            nil,
+		LoadSnapshotFresh:   true,
 		AnnotationBaseAlpha: 0.5,
 		AnnotationDuration:  200 * time.Millisecond,
 	}
@@ -147,12 +150,14 @@ func (config GameConfig) generateReplayFilename(board *Board, t time.Time) strin
 
 func Run(config GameConfig) {
 	headerHeight := uint(50)
+	minWindowWith := float64(200)
 
 	cfg := pixelgl.WindowConfig{
 		Title: "gosweep",
 		Bounds: pixel.R(
 			0, 0,
-			float64(config.Width*cellWidth), float64(config.Height*cellWidth+headerHeight),
+			math.Max(float64(config.Width*cellWidth), minWindowWith),
+			float64(config.Height*cellWidth+headerHeight),
 		),
 	}
 	win, err := pixelgl.NewWindow(cfg)
@@ -178,7 +183,8 @@ func Run(config GameConfig) {
 		win.SetBounds(
 			pixel.R(
 				0, 0,
-				float64(board.width*cellWidth), float64(board.height*cellWidth+headerHeight),
+				math.Max(float64(board.width*cellWidth), minWindowWith),
+				float64(board.height*cellWidth+headerHeight),
 			),
 		)
 
@@ -314,10 +320,30 @@ func Run(config GameConfig) {
 			imd.Draw(win)
 		}
 
-		if !board.canPlay() {
+		if board.canPlay() {
+			// Pause with Space
+			if win.JustPressed(pixelgl.KeySpace) {
+				board.TogglePaused()
+			}
+
+			// Perform single step while paused with Right Arrow
+			if board.state == Paused && win.JustPressed(pixelgl.KeyRight) {
+				board.TogglePaused()
+				board.RequestDirectorAct()
+				board.TogglePaused()
+			}
+		} else {
+			// Start a new game with Enter
 			if win.JustPressed(pixelgl.KeyEnter) {
 				config.Seed = board.rand.Int63()
 				resetBoard()
+			}
+
+			// Start a new, paused game with Space or Right Arrow
+			if win.JustPressed(pixelgl.KeySpace) || win.JustPressed(pixelgl.KeyRight) {
+				config.Seed = board.rand.Int63()
+				resetBoard()
+				board.TogglePaused()
 			}
 
 			continue

@@ -3,6 +3,8 @@ package game
 import (
 	"fmt"
 	"github.com/faiface/pixel"
+	"sync"
+	"sync/atomic"
 )
 
 type Cell struct {
@@ -44,29 +46,30 @@ func (cell *Cell) serialize() string {
 	}
 }
 
-func (cell *Cell) deserialize(c string) bool {
+func (cell *Cell) deserialize(c string, fresh bool) bool {
 	switch c {
 	case "*", "F", "O":
 		cell.isMine = true
 
 		switch c {
 		case "*":
-			cell.isLosingMine = true
-			cell.isRevealed = true
-			cell.setState(MineLosing)
+			if !fresh {
+				cell.isLosingMine = true
+				cell.isRevealed = true
+				cell.setState(MineLosing)
+			}
 		case "F":
-			cell.isFlagged = true
-			cell.setState(Flag)
+			cell.setFlagged(true)
 		default:
 			cell.setState(Unrevealed)
 		}
 	case "f":
-		cell.isFlagged = true
-		cell.setState(Flag)
+		cell.setFlagged(true)
 	case ".":
 		cell.isRevealed = true
 		// NOTE: this state will very likely be incorrect, until cell numbers are recalculated
 		cell.setState(Empty)
+		cell.board.markRevealed(cell)
 	case "#":
 		cell.isRevealed = false
 		cell.setState(Unrevealed)
@@ -226,7 +229,12 @@ func (cell *Cell) middleClick() {
 }
 
 func (cell *Cell) toggleFlagged() {
-	cell.isFlagged = !cell.isFlagged
+	cell.setFlagged(!cell.isFlagged)
+}
+
+func (cell *Cell) setFlagged(isFlagged bool) {
+	cell.isFlagged = isFlagged
+
 	if cell.isFlagged {
 		cell.setState(Flag)
 		cell.board.numFlags++
@@ -234,6 +242,41 @@ func (cell *Cell) toggleFlagged() {
 		cell.setState(Unrevealed)
 		cell.board.numFlags--
 	}
+
+	cell.board.markChanged(cell)
+}
+
+func (cell *Cell) setMine(isMine bool) {
+	wasMine := cell.isMine
+	if isMine == wasMine {
+		return
+	}
+	cell.isMine = isMine
+
+	var delta uint32
+
+	if cell.isMine {
+		cell.setState(Mine)
+		delete(cell.board.remainingCells, cell)
+		delta = 1
+	} else {
+		cell.setState(Unrevealed)
+		cell.board.remainingCells[cell] = struct{}{}
+		delta = ^uint32(0)
+	}
+
+	mineNeighbors := make(chan *Cell)
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		for cell := range mineNeighbors {
+			atomic.AddUint32(&cell.numMines, delta)
+		}
+		wg.Done()
+	}()
+
+	cell.SendNeighbors(mineNeighbors)
+	wg.Wait()
 
 	cell.board.markChanged(cell)
 }
@@ -265,7 +308,7 @@ func (cell *Cell) revealLost() {
 			cell.setState(FlagWrong)
 		}
 	} else if cell.isMine {
-		if cell.state != MineLosing {
+		if !cell.isLosingMine {
 			cell.setState(MineUnrevealed)
 		}
 	}

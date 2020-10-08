@@ -2,6 +2,7 @@ package constraint
 
 import (
 	"fmt"
+	"github.com/sirupsen/logrus"
 	"github.com/they4kman/gosweep/director/random"
 	"github.com/they4kman/gosweep/game"
 	"math"
@@ -16,7 +17,6 @@ type Director struct {
 	board *game.Board
 
 	act      chan chan<- game.CellAction
-	hasActed bool
 
 	observations       map[*Observation]struct{}
 	observationsByCell map[*game.Cell]map[*Observation]struct{}
@@ -59,7 +59,6 @@ func (observation Observation) MineProbability() float32 {
 func (director *Director) Init(board *game.Board) {
 	director.board = board
 	director.act = make(chan chan<- game.CellAction)
-	director.hasActed = false
 
 	director.observations = make(map[*Observation]struct{})
 	director.observationsByCell = make(map[*game.Cell]map[*Observation]struct{})
@@ -208,6 +207,8 @@ func (director *Director) Act(actions chan<- game.CellAction) {
 }
 
 func (director *Director) CellChanges(changes <-chan *game.Cell) {
+	logrus.Debug("Received new cell changes")
+
 	for cell := range changes {
 		if cell.IsRevealed() {
 			director.cellRevealed(cell)
@@ -228,14 +229,24 @@ func (director *Director) CellChanges(changes <-chan *game.Cell) {
 	}
 
 	// Simplify/split observations
-	for i := 0; i < 4; i++ {
-		director.simplifyObservations()
+	director.clearInferredObservations()
+	director.simplifyObservations()
+}
+
+func (director *Director) clearInferredObservations() {
+	for observation := range director.observations {
+		if len(observation.cells) == 0 || observation.origin == nil {
+			director.removeObservation(observation)
+			continue
+		}
 	}
 }
 
 func (director *Director) simplifyObservations() {
+	logrus.Debug("Simplifying observations")
+
 	for observation := range director.observations {
-		if len(observation.cells) == 0 || observation.origin == nil {
+		if len(observation.cells) == 0 {
 			director.removeObservation(observation)
 			continue
 		}
@@ -274,7 +285,13 @@ func (director *Director) simplifyObservations() {
 					}
 
 					director.addObservation(&splitObs)
+
+					logrus.Debugf(
+						"Subset:     %s\n  Superset: %s\n  Split:    %s",
+						observation, intersectingObs, splitObs)
+
 				} else if observation.numMines == 1 && len(sharedCells) > 1 {
+					// Only cells in intersectingObs
 					leftOnlyCells := make(map[*game.Cell]struct{})
 					for cell := range intersectingObs.cells {
 						if _, isShared := sharedCells[cell]; !isShared {
@@ -291,6 +308,10 @@ func (director *Director) simplifyObservations() {
 						}
 
 						director.addObservation(&occludedObs)
+
+						logrus.Debugf(
+							"Limiting:   %s\n  Limited:  %s\n  Occluded:    %s",
+							observation, intersectingObs, occludedObs)
 					}
 				}
 			}
@@ -370,11 +391,10 @@ func (director *Director) cellRevealed(cell *game.Cell) {
 
 	director.addObservation(&observation)
 
-	//XXX///////////////////////////////////////////////////////////////////////////////////////////
-	//fmt.Fprintf(os.Stdout,
-	//	"Found observation, from %d(%d, %d): g|%d, %d|\n",
-	//	cell.NumMines(), cell.X(), cell.Y(),
-	//	observation.numMines, len(observation.cells))
+	logrus.Debugf(
+		"Found observation, from %d(%d, %d): g|%d, %d|",
+		cell.NumMines(), cell.X(), cell.Y(),
+		observation.numMines, len(observation.cells))
 }
 
 func (director *Director) End() {

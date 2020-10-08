@@ -3,7 +3,6 @@ package game
 import (
 	"gopkg.in/yaml.v2"
 	"strings"
-	"sync"
 )
 
 type BoardSnapshot struct {
@@ -21,7 +20,7 @@ func (snapshot *BoardSnapshot) Serialize() string {
 }
 
 func (snapshot *BoardSnapshot) CreateBoard(config boardConfig, fresh bool) *Board {
-	rows := strings.Split(snapshot.SerializedBoard, "\n")
+	rows := strings.Split(strings.TrimSpace(snapshot.SerializedBoard), "\n")
 
 	config.Height = uint(len(rows))
 	config.Width = uint(len(rows[0]))
@@ -30,36 +29,24 @@ func (snapshot *BoardSnapshot) CreateBoard(config boardConfig, fresh bool) *Boar
 	}
 
 	config.Seed = snapshot.Seed
+	config.NumMines = 0  // this will be calculated after mines are filled
 	board := createBoard(config)
 
-	mineCells := make(chan *Cell)
+	mineCells := make(chan *Cell, config.Height * config.Width)
 
-	wg := sync.WaitGroup{}
-	wg.Add(1)
-	go func() {
-		for y, row := range rows {
-			for x, c := range row {
-				cell := board.CellAt(uint(x), uint(y))
-				cell.deserialize(string(c))
+	for y, row := range rows {
+		for x, c := range row {
+			cell := board.CellAt(uint(x), uint(y))
+			cell.deserialize(string(c), fresh)
 
-				if fresh {
-					cell.isFlagged = false
-					cell.isRevealed = false
-					cell.setState(Unrevealed)
-				}
-
-				if cell.isMine {
-					mineCells <- cell
-				}
+			if cell.isMine {
+				mineCells <- cell
 			}
 		}
-		close(mineCells)
-
-		wg.Done()
-	}()
+	}
+	close(mineCells)
 
 	board.fillMines(mineCells)
-	wg.Wait()
 
 	return board
 }

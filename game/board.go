@@ -43,6 +43,8 @@ type Board struct {
 	director             Director
 	directorFrame        int64
 	directorAct          chan struct{}
+	directorPause        chan struct{}
+	directorUnpause      chan struct{}
 	directorStop         chan struct{}
 	directorActRequested *sync.Cond
 	directorCellChanges  chan *Cell
@@ -101,6 +103,16 @@ func (board *Board) UnrevealedCells() <-chan *Cell {
 	return out
 }
 
+func (board *Board) TogglePaused() {
+	if board.state == Ongoing {
+		board.state = Paused
+		board.directorPause <- struct{}{}
+	} else {
+		board.state = Ongoing
+		board.directorUnpause <- struct{}{}
+	}
+}
+
 func (board *Board) RequestDirectorAct() {
 	if board.directorActRequested != nil {
 		board.directorActRequested.Broadcast()
@@ -153,7 +165,7 @@ func (board *Board) screenToGridCoords(pos pixel.Vec) (uint, uint) {
 }
 
 func (board *Board) canPlay() bool {
-	return board.state == Ongoing
+	return board.state == Ongoing || board.state == Paused
 }
 
 func (board *Board) win() {
@@ -184,6 +196,11 @@ func (board *Board) endGame() {
 		close(board.directorStop)
 		board.directorStop = nil
 
+		close(board.directorPause)
+		board.directorPause = nil
+		close(board.directorUnpause)
+		board.directorUnpause = nil
+
 		board.director.End()
 	}
 
@@ -196,6 +213,11 @@ func (board *Board) startGame() {
 	if board.director != nil {
 		board.director.Init(board)
 		board.director.ActContinuously(board.directorAct, board.directorStop)
+
+		// Emit all cells to director at start of game
+		for cell := range board.Cells() {
+			board.directorCellChanges <- cell
+		}
 	}
 }
 
@@ -277,24 +299,29 @@ func (board *Board) clearSurroundingMines(center *Cell) {
 }
 
 func (board *Board) fillMines(cells <-chan *Cell) {
-	mineNeighborChan := make(chan *Cell, board.numMines)
+	mineNeighbors := make(chan *Cell)
 
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 	go func() {
-		for cell := range mineNeighborChan {
+		for cell := range mineNeighbors {
 			atomic.AddUint32(&cell.numMines, 1)
+
+			if cell.isRevealed {
+				cell.setState(CellState(cell.numMines))
+			}
 		}
 		wg.Done()
 	}()
 
 	for cell := range cells {
 		cell.isMine = true
+		board.numMines++
 		delete(board.remainingCells, cell)
 
-		cell.SendNeighbors(mineNeighborChan)
+		cell.SendNeighbors(mineNeighbors)
 	}
-	close(mineNeighborChan)
+	close(mineNeighbors)
 
 	wg.Wait()
 }
@@ -311,7 +338,7 @@ func (board *Board) randomCells(n uint) <-chan *Cell {
 	board.rand.Shuffle(len(cellIndexes), func(i, j int) {
 		cellIndexes[i], cellIndexes[j] = cellIndexes[j], cellIndexes[i]
 	})
-	for i := uint(0); i < board.numMines; i++ {
+	for i := uint(0); i < n; i++ {
 		cellIdx := cellIndexes[i]
 		y, x := cellIdx/board.width, cellIdx%board.width
 		cells <- board.CellAt(x, y)
@@ -325,7 +352,7 @@ func createBoard(config boardConfig) *Board {
 	board := Board{
 		width:    config.Width,
 		height:   config.Height,
-		numMines: config.NumMines,
+		numMines: 0, // this will be set to its final value by fillMines
 		mode:     config.Mode,
 
 		initialSeed: config.Seed,
@@ -347,13 +374,20 @@ func createBoard(config boardConfig) *Board {
 
 	if config.Director != nil {
 		board.directorAct = make(chan struct{})
+		board.directorPause = make(chan struct{})
+		board.directorUnpause = make(chan struct{})
 		board.directorStop = make(chan struct{})
 		board.directorActRequested = sync.NewCond(&sync.Mutex{})
 		board.directorCellChanges = make(chan *Cell, board.NumCells())
 
 		go func() {
-			for range board.directorAct {
-				board.RequestDirectorAct()
+			for {
+				select {
+				case <-board.directorAct:
+					board.RequestDirectorAct()
+				case <-board.directorPause:
+					<-board.directorUnpause
+				}
 			}
 		}()
 
@@ -420,6 +454,10 @@ func createBoard(config boardConfig) *Board {
 			cell.board = &board
 			cell.idx = cellIdx
 			cell.x, cell.y = x, y
+			cell.isMine = false
+			cell.isLosingMine = false
+			cell.isFlagged = false
+			cell.isRevealed = false
 			cell.numMines = 0
 			cell.state = Unrevealed
 			cell.sprite = cellSprites[Unrevealed]
@@ -436,6 +474,6 @@ func createBoard(config boardConfig) *Board {
 
 func createFilledBoard(config boardConfig) *Board {
 	board := createBoard(config)
-	board.fillMines(board.randomCells(board.numMines))
+	board.fillMines(board.randomCells(config.NumMines))
 	return board
 }

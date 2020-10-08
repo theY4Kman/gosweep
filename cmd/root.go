@@ -3,9 +3,11 @@ package cmd
 import (
 	"fmt"
 	"github.com/faiface/pixel/pixelgl"
+	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/they4kman/gosweep/director/constraint"
 	"github.com/they4kman/gosweep/game"
+	"io"
 	"io/ioutil"
 	"os"
 	"time"
@@ -15,6 +17,7 @@ var gameConfig = game.NewGameConfig()
 var useDirector = false
 var savedSnapshotsDir string
 var snapshotToLoad string
+var verbosity string
 
 var rootCmd = &cobra.Command{
 	Use:   "gosweep",
@@ -123,7 +126,17 @@ func (modeVal *gameModeValue) Set(value string) error {
 }
 
 func (modeVal *gameModeValue) Type() string {
-	return "game.GameMode"
+	return "game mode"
+}
+
+func setUpLogging(out io.Writer, level string) error {
+	logrus.SetOutput(out)
+	lvl, err := logrus.ParseLevel(level)
+	if err != nil {
+		return err
+	}
+	logrus.SetLevel(lvl)
+	return nil
 }
 
 func init() {
@@ -135,12 +148,23 @@ func init() {
 	rootCmd.Flags().UintVarP(&gameConfig.Height, "height", "h", 16, "Height of game board, in cells")
 	rootCmd.Flags().UintVarP(&gameConfig.NumMines, "mines", "m", 99, "Number of mines to place in the game board")
 	rootCmd.Flags().Var(newGameModeValue(game.Win7, &gameConfig.Mode), "mode", `Game mode, controlling behaviour of first click.
-win7: all cells surrounding the first-clicked cell are cleared of mines (first click never loses)
-classic: mines are left as is (first click can lose the game)`)
+ - win7:    all cells surrounding the first-clicked cell are cleared of mines
+            (first click never loses)
+ - classic: mines are left as is
+            (first click can lose the game)`)
 	rootCmd.Flags().BoolVarP(&useDirector, "director", "d", false, "Make the computer play")
 	rootCmd.Flags().Int64Var(&gameConfig.Seed, "seed", 1, "Initial seed to feed into random number generator")
 
 	rootCmd.Flags().StringVar(&savedSnapshotsDir, "save-snapshots-to", "", "Directory to save endgame board snapshots to")
 	rootCmd.Flags().StringVar(&snapshotToLoad, "load", "", "Board snapshot to load and play")
 	rootCmd.Flags().BoolVar(&gameConfig.LoadSnapshotFresh, "load-fresh", true, "Whether to load the specified snapshot completely unrevealed")
+
+	rootCmd.PersistentFlags().StringVarP(&verbosity, "verbosity", "v", logrus.WarnLevel.String(), "Log level (debug, info, warn, error, fatal, panic")
+
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		if err := setUpLogging(os.Stdout, verbosity); err != nil {
+			return err
+		}
+		return nil
+	}
 }
