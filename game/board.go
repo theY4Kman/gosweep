@@ -44,7 +44,6 @@ type Board struct {
 	directorFrame        int64
 	directorAct          chan struct{}
 	directorPause        chan struct{}
-	directorUnpause      chan struct{}
 	directorStop         chan struct{}
 	directorActRequested *sync.Cond
 	directorCellChanges  chan *Cell
@@ -106,11 +105,10 @@ func (board *Board) UnrevealedCells() <-chan *Cell {
 func (board *Board) TogglePaused() {
 	if board.state == Ongoing {
 		board.state = Paused
-		board.directorPause <- struct{}{}
 	} else {
 		board.state = Ongoing
-		board.directorUnpause <- struct{}{}
 	}
+	board.directorPause <- struct{}{}
 }
 
 func (board *Board) RequestDirectorAct() {
@@ -198,8 +196,6 @@ func (board *Board) endGame() {
 
 		close(board.directorPause)
 		board.directorPause = nil
-		close(board.directorUnpause)
-		board.directorUnpause = nil
 
 		board.director.End()
 	}
@@ -375,18 +371,24 @@ func createBoard(config boardConfig) *Board {
 	if config.Director != nil {
 		board.directorAct = make(chan struct{})
 		board.directorPause = make(chan struct{})
-		board.directorUnpause = make(chan struct{})
 		board.directorStop = make(chan struct{})
 		board.directorActRequested = sync.NewCond(&sync.Mutex{})
 		board.directorCellChanges = make(chan *Cell, board.NumCells())
 
 		go func() {
+			// Allow the game to start paused
+			select {
+			case <-board.directorPause:
+				<-board.directorPause
+			default:
+			}
+
 			for {
 				select {
 				case <-board.directorAct:
 					board.RequestDirectorAct()
 				case <-board.directorPause:
-					<-board.directorUnpause
+					<-board.directorPause
 				}
 			}
 		}()

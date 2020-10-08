@@ -176,8 +176,11 @@ func Run(config GameConfig) {
 	var hoveredCell *Cell
 
 	var board *Board
-	resetBoard := func() {
+	_resetBoard := func(paused bool) {
 		board = config.createBoard()
+		if paused {
+			board.TogglePaused()
+		}
 		board.startGame()
 
 		win.SetBounds(
@@ -197,6 +200,12 @@ func Run(config GameConfig) {
 
 		cellPosText = text.New(topRight.Add(pixel.V(-60, -30)), basicAtlas)
 		cellPosText.Color = colornames.Darkcyan
+	}
+	resetBoard := func() {
+		_resetBoard(false)
+	}
+	resetBoardPaused := func() {
+		_resetBoard(true)
 	}
 
 	resetBoard()
@@ -342,8 +351,7 @@ func Run(config GameConfig) {
 			// Start a new, paused game with Space or Right Arrow
 			if win.JustPressed(pixelgl.KeySpace) || win.JustPressed(pixelgl.KeyRight) {
 				config.Seed = board.rand.Int63()
-				resetBoard()
-				board.TogglePaused()
+				resetBoardPaused()
 			}
 
 			continue
