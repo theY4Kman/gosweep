@@ -65,6 +65,10 @@ func (board *Board) NumCells() uint {
 	return board.width * board.height
 }
 
+func (board *Board) NumMinesRemaining() uint {
+	return board.numMines - board.numFlags
+}
+
 func (board *Board) Rand() *rand.Rand {
 	return board.rand
 }

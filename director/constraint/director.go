@@ -69,6 +69,7 @@ func (director *Director) Init(board *game.Board) {
 		for actions := range director.act {
 			actors := []func(actions chan<- game.CellAction){
 				director.actDeliberate,
+				director.actEndGame,
 				director.actLowestProbability,
 				director.actRandom,
 			}
@@ -152,6 +153,42 @@ func (director *Director) actLowestProbability(actions chan<- game.CellAction) {
 		})
 
 		actions <- lowestProbabilityCells[0].Click()
+	}
+
+	close(actions)
+}
+
+func (director *Director) actEndGame(actions chan<- game.CellAction) {
+	if director.board.NumMinesRemaining() == 1 {
+		director.observationsLock.Lock()
+		defer director.observationsLock.Unlock()
+
+		var sharedCells map[*game.Cell]struct{} = nil
+
+		for observation := range director.observations {
+			if observation.numMines != 1 {
+				continue
+			}
+
+			if sharedCells == nil {
+				sharedCells = make(map[*game.Cell]struct{})
+				for cell := range observation.cells {
+					sharedCells[cell] = struct{}{}
+				}
+			} else {
+				for cell := range sharedCells {
+					if _, isShared := observation.cells[cell]; !isShared {
+						delete(sharedCells, cell)
+					}
+				}
+			}
+		}
+
+		if len(sharedCells) == 1 {
+			for cell := range sharedCells {
+				actions <- cell.RightClick()
+			}
+		}
 	}
 
 	close(actions)
