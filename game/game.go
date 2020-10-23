@@ -336,7 +336,7 @@ func Run(config GameConfig) {
 			}
 
 			// Perform single step while paused with Right Arrow
-			if board.state == Paused && win.JustPressed(pixelgl.KeyRight) {
+			if board.state == Paused && (win.JustPressed(pixelgl.KeyRight) || win.Repeated(pixelgl.KeyRight)) {
 				board.TogglePaused()
 				board.RequestDirectorAct()
 				board.TogglePaused()
