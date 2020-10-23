@@ -211,9 +211,12 @@ func (board *Board) startGame() {
 		board.director.ActContinuously(board.directorAct, board.directorStop)
 
 		// Emit all cells to director at start of game
+		initialCells := make(chan *Cell, board.NumCells())
 		for cell := range board.Cells() {
-			board.directorCellChanges <- cell
+			initialCells <- cell
 		}
+		close(initialCells)
+		board.director.CellChanges(initialCells)
 	}
 }
 
