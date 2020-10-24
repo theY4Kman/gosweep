@@ -109,8 +109,10 @@ func (board *Board) UnrevealedCells() <-chan *Cell {
 func (board *Board) TogglePaused() {
 	if board.state == Ongoing {
 		board.state = Paused
-	} else {
+	} else if board.state == Paused {
 		board.state = Ongoing
+	} else {
+		return
 	}
 	board.directorPause <- struct{}{}
 }
@@ -179,17 +181,23 @@ func (board *Board) lose() {
 	board.state = Lost
 	board.endGame()
 
+	wg := sync.WaitGroup{}
+
 	revealLost := func(cells <-chan *Cell) {
 		for cell := range cells {
 			cell.revealLost()
 		}
+		wg.Done()
 	}
 
 	cells := board.Cells()
 
 	for i := 0; i < 4; i++ {
+		wg.Add(1)
 		go revealLost(cells)
 	}
+
+	wg.Wait()
 }
 
 func (board *Board) endGame() {
@@ -378,7 +386,7 @@ func createBoard(config boardConfig) *Board {
 	if config.Director != nil {
 		board.directorAct = make(chan struct{})
 		board.directorPause = make(chan struct{})
-		board.directorStop = make(chan struct{})
+		board.directorStop = make(chan struct{}, 1)
 		board.directorActRequested = sync.NewCond(&sync.Mutex{})
 		board.directorCellChanges = make(chan *Cell, board.NumCells())
 
