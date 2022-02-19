@@ -1,6 +1,8 @@
 package game
 
 import (
+	"bytes"
+	_ "embed"
 	"fmt"
 	"github.com/faiface/pixel/imdraw"
 	"github.com/faiface/pixel/text"
@@ -18,6 +20,8 @@ import (
 	"golang.org/x/image/colornames"
 )
 
+//go:embed assets/spritesheet.png
+var spritesheetPNG []byte
 var cellSprites = map[CellState]*pixel.Sprite{}
 
 type GameMode int
@@ -384,10 +388,11 @@ func InOutCubic(t float64) float64 {
 }
 
 func loadSpritesheet() pixel.Picture {
-	spritesheet, err := loadPicture("assets/spritesheet.png")
+	img, _, err := image.Decode(bytes.NewReader(spritesheetPNG))
 	if err != nil {
 		panic(err)
 	}
+	spritesheet := pixel.PictureDataFromImage(img)
 
 	x1, x2 := float64(0), float64(cellWidth)
 	y2 := spritesheet.Bounds().Max.Y
@@ -399,18 +404,4 @@ func loadSpritesheet() pixel.Picture {
 	}
 
 	return spritesheet
-}
-
-func loadPicture(path string) (pixel.Picture, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	img, _, err := image.Decode(file)
-	if err != nil {
-		return nil, err
-	}
-	return pixel.PictureDataFromImage(img), nil
 }
