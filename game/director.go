@@ -54,7 +54,7 @@ type Director interface {
 
 	// Request calls to Act() periodically, by sending messages onto
 	// the act channel, until a message is passed to the done channel
-	ActContinuously(act chan<- struct{}, done <-chan struct{})
+	actContinuously(tickRate time.Duration, act chan<- struct{}, done <-chan struct{})
 
 	// Called before Act() with a channel containing all the Cells that have
 	// changed since the last call to Act()
@@ -72,9 +72,9 @@ func (director *BaseDirector) Init(*Board) {
 func (director *BaseDirector) Act(chan<- CellAction) {
 }
 
-func (director *BaseDirector) ActContinuously(act chan<- struct{}, done <-chan struct{}) {
+func (director *BaseDirector) actContinuously(tickRate time.Duration, act chan<- struct{}, done <-chan struct{}) {
 	go func() {
-		tick := time.Tick(25 * time.Millisecond)
+		tick := time.Tick(tickRate)
 
 		for {
 			select {

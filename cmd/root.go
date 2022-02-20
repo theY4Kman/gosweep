@@ -144,20 +144,21 @@ func init() {
 	// Ref: https://github.com/spf13/cobra/issues/291
 	rootCmd.Flags().Bool("help", false, "Help for this command")
 
-	rootCmd.Flags().UintVarP(&gameConfig.Width, "width", "w", 30, "Width of game board, in cells")
-	rootCmd.Flags().UintVarP(&gameConfig.Height, "height", "h", 16, "Height of game board, in cells")
-	rootCmd.Flags().UintVarP(&gameConfig.NumMines, "mines", "m", 99, "Number of mines to place in the game board")
+	rootCmd.Flags().UintVarP(&gameConfig.Width, "width", "w", gameConfig.Width, "Width of game board, in cells")
+	rootCmd.Flags().UintVarP(&gameConfig.Height, "height", "h", gameConfig.Height, "Height of game board, in cells")
+	rootCmd.Flags().UintVarP(&gameConfig.NumMines, "mines", "m", gameConfig.NumMines, "Number of mines to place in the game board")
 	rootCmd.Flags().Var(newGameModeValue(game.Win7, &gameConfig.Mode), "mode", `Game mode, controlling behaviour of first click.
  - win7:    all cells surrounding the first-clicked cell are cleared of mines
             (first click never loses)
  - classic: mines are left as is
             (first click can lose the game)`)
 	rootCmd.Flags().BoolVarP(&useDirector, "director", "d", false, "Make the computer play")
+	rootCmd.Flags().DurationVar(&gameConfig.DirectorTickRate, "tick-rate", gameConfig.DirectorTickRate, "Make the computer play")
 	rootCmd.Flags().Int64Var(&gameConfig.Seed, "seed", 1, "Initial seed to feed into random number generator")
 
 	rootCmd.Flags().StringVar(&savedSnapshotsDir, "save-snapshots-to", "", "Directory to save endgame board snapshots to")
 	rootCmd.Flags().StringVar(&snapshotToLoad, "load", "", "Board snapshot to load and play")
-	rootCmd.Flags().BoolVar(&gameConfig.LoadSnapshotFresh, "load-fresh", true, "Whether to load the specified snapshot completely unrevealed")
+	rootCmd.Flags().BoolVar(&gameConfig.LoadSnapshotFresh, "load-fresh", gameConfig.LoadSnapshotFresh, "Whether to load the specified snapshot completely unrevealed")
 
 	rootCmd.PersistentFlags().StringVarP(&verbosity, "verbosity", "v", logrus.WarnLevel.String(), "Log level (debug, info, warn, error, fatal, panic")
 

@@ -43,7 +43,8 @@ type GameConfig struct {
 	// Whether to set all cells as unrevealed when loading the Snapshot
 	LoadSnapshotFresh bool
 
-	Director Director
+	Director         Director
+	DirectorTickRate time.Duration
 
 	// Transparency of annotations when first displayed
 	AnnotationBaseAlpha float64
@@ -61,6 +62,7 @@ func NewGameConfig() GameConfig {
 		NumMines:            99,
 		Mode:                Classic,
 		Director:            nil,
+		DirectorTickRate:    25 * time.Millisecond,
 		Snapshot:            nil,
 		LoadSnapshotFresh:   true,
 		AnnotationBaseAlpha: 0.5,
@@ -71,20 +73,22 @@ func NewGameConfig() GameConfig {
 func (config GameConfig) createBoard() *Board {
 	if config.Snapshot == nil {
 		return createFilledBoard(boardConfig{
-			Width:     config.Width,
-			Height:    config.Height,
-			NumMines:  config.NumMines,
-			Mode:      config.Mode,
-			Seed:      config.Seed,
-			Director:  config.Director,
-			OnGameEnd: config.onGameEnd,
+			Width:            config.Width,
+			Height:           config.Height,
+			NumMines:         config.NumMines,
+			Mode:             config.Mode,
+			Seed:             config.Seed,
+			Director:         config.Director,
+			DirectorTickRate: config.DirectorTickRate,
+			OnGameEnd:        config.onGameEnd,
 		})
 	} else {
 		return config.Snapshot.CreateBoard(
 			boardConfig{
-				Mode:      config.Mode,
-				Director:  config.Director,
-				OnGameEnd: config.onGameEnd,
+				Mode:             config.Mode,
+				Director:         config.Director,
+				DirectorTickRate: config.DirectorTickRate,
+				OnGameEnd:        config.onGameEnd,
 			},
 			config.LoadSnapshotFresh,
 		)

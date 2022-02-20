@@ -18,7 +18,8 @@ type boardConfig struct {
 
 	Seed int64
 
-	Director Director
+	Director         Director
+	DirectorTickRate time.Duration
 
 	OnGameEnd func(*Board)
 }
@@ -41,6 +42,7 @@ type Board struct {
 	actionGroup sync.WaitGroup
 
 	director             Director
+	directorTickRate     time.Duration
 	directorFrame        int64
 	directorAct          chan struct{}
 	directorPause        chan struct{}
@@ -220,7 +222,7 @@ func (board *Board) endGame() {
 func (board *Board) startGame() {
 	if board.director != nil {
 		board.director.Init(board)
-		board.director.ActContinuously(board.directorAct, board.directorStop)
+		board.director.actContinuously(board.directorTickRate, board.directorAct, board.directorStop)
 
 		// Emit all cells to director at start of game
 		initialCells := make(chan *Cell, board.NumCells())
@@ -378,7 +380,8 @@ func createBoard(config boardConfig) *Board {
 		actionGroup: sync.WaitGroup{},
 		revelations: make(chan *Cell),
 
-		director: config.Director,
+		director:         config.Director,
+		directorTickRate: config.DirectorTickRate,
 
 		onGameEnd: config.OnGameEnd,
 	}
