@@ -2,7 +2,10 @@
 
 package game
 
-import "sync"
+import (
+	"github.com/they4kman/gosweep/util/collections"
+	"sync"
+)
 
 const DefaultParallelism = 20
 
@@ -14,7 +17,7 @@ func flood(cell *Cell, visit Visitor, getNeighbors NeighborGetter) {
 }
 
 func parallelFlood(cell *Cell, parallelism int, visit Visitor, getNeighbors NeighborGetter) {
-	visited := make(map[uint]struct{})
+	visited := make(collections.Set[uint])
 	visitQueue := make([]*Cell, 0)
 	visitLock := sync.Mutex{}
 	permitCh := make(chan struct{}, parallelism)
@@ -27,11 +30,11 @@ func parallelFlood(cell *Cell, parallelism int, visit Visitor, getNeighbors Neig
 		defer visitLock.Unlock()
 
 		// Don't visit, if already visited
-		if _, alreadyVisited := visited[cell.idx]; alreadyVisited {
+		if visited.Contains(cell.idx) {
 			return
 		}
+		visited.Add(cell.idx)
 
-		visited[cell.idx] = struct{}{}
 		visitQueue = append(visitQueue, cell)
 		wg.Add(1)
 

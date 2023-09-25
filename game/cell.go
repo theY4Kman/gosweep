@@ -261,7 +261,7 @@ func (cell *Cell) setMine(isMine bool) {
 		delta = 1
 	} else {
 		cell.setState(Unrevealed)
-		cell.board.remainingCells[cell] = struct{}{}
+		cell.board.remainingCells.Add(cell)
 		delta = ^uint32(0)
 	}
 

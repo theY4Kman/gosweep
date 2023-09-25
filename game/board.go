@@ -3,6 +3,7 @@ package game
 import (
 	"github.com/faiface/pixel"
 	"github.com/gammazero/deque"
+	"github.com/they4kman/gosweep/util/collections"
 	"github.com/they4kman/gosweep/util/lockedRand"
 	"math/rand"
 	"strings"
@@ -36,7 +37,7 @@ type Board struct {
 	cells          [][]Cell
 	hasClicked     bool
 	numFlags       uint
-	remainingCells map[*Cell]struct{}
+	remainingCells collections.Set[*Cell]
 
 	revelations chan *Cell
 	actionGroup sync.WaitGroup
@@ -247,10 +248,10 @@ func (board *Board) markChanged(cell *Cell) {
 func (board *Board) clearSurroundingMines(center *Cell) {
 	wg := sync.WaitGroup{}
 
-	possibleRelocationsMap := make(map[*Cell]struct{})
+	possibleRelocationsSet := make(collections.Set[*Cell])
 	for cell := range board.Cells() {
 		if !cell.isMine {
-			possibleRelocationsMap[cell] = struct{}{}
+			possibleRelocationsSet.Add(cell)
 		}
 	}
 
@@ -265,23 +266,23 @@ func (board *Board) clearSurroundingMines(center *Cell) {
 
 	numSurroundingMines := 0
 	for cell := range center.SelfNeighbors() {
-		delete(possibleRelocationsMap, cell)
+		delete(possibleRelocationsSet, cell)
 
 		if cell.isMine {
 			numSurroundingMines++
 
 			cell.isMine = false
-			board.remainingCells[cell] = struct{}{}
+			board.remainingCells.Add(cell)
 
 			cell.SendNeighbors(decreaseNumMines)
 		}
 	}
 	close(decreaseNumMines)
 
-	possibleRelocations := make([]*Cell, len(possibleRelocationsMap))
+	possibleRelocations := make([]*Cell, len(possibleRelocationsSet))
 
 	i := 0
-	for cell := range possibleRelocationsMap {
+	for cell := range possibleRelocationsSet {
 		possibleRelocations[i] = cell
 		i++
 	}
@@ -375,7 +376,7 @@ func createBoard(config boardConfig) *Board {
 		cells:          make([][]Cell, config.Height),
 		hasClicked:     false,
 		numFlags:       0,
-		remainingCells: make(map[*Cell]struct{}),
+		remainingCells: make(collections.Set[*Cell]),
 
 		actionGroup: sync.WaitGroup{},
 		revelations: make(chan *Cell),
@@ -430,9 +431,9 @@ func createBoard(config boardConfig) *Board {
 				board.directorFrame++
 				go board.director.Act(actions)
 
-				dedupedActions := make(map[CellAction]struct{})
+				dedupedActions := make(collections.Set[CellAction])
 				for cellAction := range actions {
-					dedupedActions[cellAction] = struct{}{}
+					dedupedActions.Add(cellAction)
 				}
 
 				for cellAction := range dedupedActions {
@@ -483,7 +484,7 @@ func createBoard(config boardConfig) *Board {
 			cell.sprite = cellSprites[Unrevealed]
 			cell.isDirty = true
 
-			board.remainingCells[cell] = struct{}{}
+			board.remainingCells.Add(cell)
 
 			cellIdx++
 		}

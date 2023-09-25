@@ -7,7 +7,13 @@ import (
 
 type BoardSnapshot struct {
 	Seed            int64  `yaml:"seed"`
+	Mode            string `yaml:"mode"`
 	SerializedBoard string `yaml:"board,flow"`
+}
+
+var gameModes = map[string]GameMode{
+	"win7":    Win7,
+	"classic": Classic,
 }
 
 func (snapshot *BoardSnapshot) Serialize() string {
@@ -29,10 +35,11 @@ func (snapshot *BoardSnapshot) CreateBoard(config boardConfig, fresh bool) *Boar
 	}
 
 	config.Seed = snapshot.Seed
-	config.NumMines = 0  // this will be calculated after mines are filled
+	config.Mode = gameModes[snapshot.Mode]
+	config.NumMines = 0 // this will be calculated after mines are filled
 	board := createBoard(config)
 
-	mineCells := make(chan *Cell, config.Height * config.Width)
+	mineCells := make(chan *Cell, config.Height*config.Width)
 
 	for y, row := range rows {
 		for x, c := range row {

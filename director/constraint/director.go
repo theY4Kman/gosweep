@@ -5,6 +5,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/they4kman/gosweep/director/random"
 	"github.com/they4kman/gosweep/game"
+	"github.com/they4kman/gosweep/util/collections"
 	"math"
 	"reflect"
 	"strings"
@@ -16,17 +17,17 @@ type Director struct {
 
 	board *game.Board
 
-	act      chan chan<- game.CellAction
+	act chan chan<- game.CellAction
 
-	observations       map[*Observation]struct{}
-	observationsByCell map[*game.Cell]map[*Observation]struct{}
-	observationsLock   sync.Mutex
+	observations       collections.Set[*Observation]
+	observationsByCell map[*game.Cell]collections.Set[*Observation]
+	observationsLock   *sync.Mutex
 }
 
 type Observation struct {
 	origin   *game.Cell
 	numMines int
-	cells    map[*game.Cell]struct{}
+	cells    collections.Set[*game.Cell]
 }
 
 func (observation Observation) String() string {
@@ -60,10 +61,12 @@ func (director *Director) Init(board *game.Board) {
 	director.board = board
 	director.act = make(chan chan<- game.CellAction)
 
-	director.observations = make(map[*Observation]struct{})
-	director.observationsByCell = make(map[*game.Cell]map[*Observation]struct{})
+	director.observations = make(collections.Set[*Observation])
+	director.observationsByCell = make(map[*game.Cell]collections.Set[*Observation])
 
-	director.observationsLock = sync.Mutex{}
+	if director.observationsLock == nil {
+		director.observationsLock = &sync.Mutex{}
+	}
 
 	go func() {
 		for actions := range director.act {
@@ -163,7 +166,7 @@ func (director *Director) actEndGame(actions chan<- game.CellAction) {
 		director.observationsLock.Lock()
 		defer director.observationsLock.Unlock()
 
-		var sharedCells map[*game.Cell]struct{} = nil
+		var sharedCells collections.Set[*game.Cell] = nil
 
 		for observation := range director.observations {
 			if observation.numMines != 1 {
@@ -171,9 +174,9 @@ func (director *Director) actEndGame(actions chan<- game.CellAction) {
 			}
 
 			if sharedCells == nil {
-				sharedCells = make(map[*game.Cell]struct{})
+				sharedCells = make(collections.Set[*game.Cell])
 				for cell := range observation.cells {
-					sharedCells[cell] = struct{}{}
+					sharedCells.Add(cell)
 				}
 			} else {
 				for cell := range sharedCells {
@@ -251,6 +254,7 @@ func (director *Director) CellChanges(changes <-chan *game.Cell) {
 			director.cellRevealed(cell)
 		}
 
+		director.observationsLock.Lock()
 		if cellObservations, ok := director.observationsByCell[cell]; ok {
 			for observation := range cellObservations {
 				if observation.numMines == 0 || len(observation.cells) == 0 {
@@ -263,6 +267,7 @@ func (director *Director) CellChanges(changes <-chan *game.Cell) {
 				}
 			}
 		}
+		director.observationsLock.Unlock()
 	}
 
 	// Simplify/split observations
@@ -288,39 +293,25 @@ func (director *Director) simplifyObservations() {
 			continue
 		}
 
-		visited := make(map[*Observation]struct{})
+		visited := make(collections.Set[*Observation])
 
 		for cell := range observation.cells {
 			for intersectingObs := range director.observationsByCell[cell] {
 				if intersectingObs == observation {
 					continue
 				}
-				if _, alreadyVisited := visited[intersectingObs]; alreadyVisited {
+				if visited.Contains(intersectingObs) {
 					continue
 				}
-				visited[intersectingObs] = struct{}{}
+				visited.Add(intersectingObs)
 
-				isSubset := true
-				sharedCells := make(map[*game.Cell]struct{})
-				for cell := range observation.cells {
-					if _, isInIntersectingObs := intersectingObs.cells[cell]; isInIntersectingObs {
-						sharedCells[cell] = struct{}{}
-					} else {
-						isSubset = false
-					}
-				}
+				sharedCells, isSubset := observation.cells.IntersectionEx(intersectingObs.cells)
 
 				if isSubset {
 					splitObs := Observation{
 						numMines: intersectingObs.numMines - observation.numMines,
-						cells:    make(map[*game.Cell]struct{}),
+						cells:    intersectingObs.cells.Difference(observation.cells),
 					}
-					for cell := range intersectingObs.cells {
-						if _, isInObs := observation.cells[cell]; !isInObs {
-							splitObs.cells[cell] = struct{}{}
-						}
-					}
-
 					director.addObservation(&splitObs)
 
 					logrus.Debugf(
@@ -329,13 +320,7 @@ func (director *Director) simplifyObservations() {
 
 				} else if observation.numMines == 1 && len(sharedCells) > 1 {
 					// Only cells in intersectingObs
-					leftOnlyCells := make(map[*game.Cell]struct{})
-					for cell := range intersectingObs.cells {
-						if _, isShared := sharedCells[cell]; !isShared {
-							leftOnlyCells[cell] = struct{}{}
-						}
-					}
-
+					leftOnlyCells := intersectingObs.cells.Difference(sharedCells)
 					occludedMines := intersectingObs.numMines - observation.numMines
 
 					if occludedMines == len(leftOnlyCells) {
@@ -362,20 +347,20 @@ func (director *Director) addObservation(observation *Observation) {
 		return
 	}
 
-	dupeVisited := make(map[*Observation]struct{})
+	dupeVisited := make(collections.Set[*Observation])
 	for cell := range observation.cells {
-		var cellObservations map[*Observation]struct{}
+		var cellObservations collections.Set[*Observation]
 		var exists bool
 		if cellObservations, exists = director.observationsByCell[cell]; !exists {
-			cellObservations = make(map[*Observation]struct{})
+			cellObservations = make(collections.Set[*Observation])
 			director.observationsByCell[cell] = cellObservations
 		}
 
 		for otherObs := range cellObservations {
-			if _, hasVisited := dupeVisited[otherObs]; hasVisited {
+			if dupeVisited.Contains(otherObs) {
 				continue
 			}
-			dupeVisited[otherObs] = struct{}{}
+			dupeVisited.Add(otherObs)
 
 			// Don't add duplicates
 			if reflect.DeepEqual(observation.cells, otherObs.cells) {
@@ -383,10 +368,10 @@ func (director *Director) addObservation(observation *Observation) {
 			}
 		}
 
-		cellObservations[observation] = struct{}{}
+		cellObservations.Add(observation)
 	}
 
-	director.observations[observation] = struct{}{}
+	director.observations.Add(observation)
 }
 
 func (director *Director) removeObservation(observation *Observation) {
@@ -406,7 +391,7 @@ func (director *Director) cellRevealed(cell *game.Cell) {
 	observation := Observation{
 		origin:   cell,
 		numMines: int(cell.NumMines()),
-		cells:    make(map[*game.Cell]struct{}),
+		cells:    make(collections.Set[*game.Cell]),
 	}
 
 	for neighbor := range cell.Neighbors() {
@@ -414,7 +399,7 @@ func (director *Director) cellRevealed(cell *game.Cell) {
 			if neighbor.IsFlagged() {
 				observation.numMines--
 			} else {
-				observation.cells[neighbor] = struct{}{}
+				observation.cells.Add(neighbor)
 			}
 		}
 	}
