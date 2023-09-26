@@ -185,6 +185,8 @@ func Run(config GameConfig) {
 
 	var board *Board
 	_resetBoard := func(paused bool) {
+		batch.Clear()
+
 		board = config.createBoard()
 		if paused {
 			board.TogglePaused()
@@ -219,128 +221,142 @@ func Run(config GameConfig) {
 	resetBoard()
 
 	var (
-		frames = 0
-		second = time.Tick(time.Second)
+		frames        = 0
+		frameStart    = time.Now()
+		frameDuration = time.Now().Sub(frameStart)
+		frameDelay    = time.Second * 0
+		second        = time.Tick(time.Second)
+		tickRate      = time.Second / 60
+		ticker        = time.NewTicker(tickRate)
 	)
+
+	requestFrame := func() {
+		ticker.Reset(time.Nanosecond)
+	}
 
 	bgColor := colornames.Gainsboro
 	for !win.Closed() {
-		win.Update()
-		win.Clear(bgColor)
-
-		frames++
 		select {
 		case <-second:
 			win.SetTitle(fmt.Sprintf("%s | FPS: %d", cfg.Title, frames))
 			frames = 0
+		case <-ticker.C:
+			frames++
+
+			frameStart = time.Now()
+			win.Clear(bgColor)
+
+			scoreText.Clear()
+			scoreText.Color = colornames.Black
+
+			fmt.Fprintf(scoreText, "%03d", board.numMines-board.numFlags)
+			if !board.canPlay() {
+				var boardState string
+				if board.state == Won {
+					boardState = "WIN!"
+					scoreText.Color = colornames.Green
+				} else if board.state == Lost {
+					boardState = "LOSE :("
+					scoreText.Color = colornames.Red
+				}
+
+				fmt.Fprintf(scoreText, "   %s", boardState)
+			}
+			scoreText.Draw(win, pixel.IM)
+
+			if win.MouseInsideWindow() {
+				x, y := board.screenToGridCoords(win.MousePosition())
+				hoveredCell = board.CellAt(x, y)
+			} else {
+				hoveredCell = nil
+			}
+
+			cellPosText.Clear()
+			if hoveredCell != nil {
+				fmt.Fprintf(cellPosText, "(%d, %d)", hoveredCell.x, hoveredCell.y)
+				cellPosText.Draw(win, pixel.IM)
+			}
+
+			for y, row := range board.cells {
+				rowStart := boardTopLeft.Add(pixel.V(cellWidth/2, -float64(cellWidth/2+cellWidth*y)))
+
+				for x, cell := range row {
+					cellPos := rowStart.Add(pixel.V(float64(cellWidth*x), 0))
+
+					if cell.isDirty {
+						cell.sprite.Draw(batch, pixel.IM.Moved(cellPos))
+						(&board.cells[y][x]).isDirty = false
+					}
+				}
+			}
+			batch.Draw(win)
+
+			if board.directorAnnotations.Len() > 0 {
+				imd := imdraw.New(nil)
+
+				now := time.Now()
+				for i := 0; i < board.directorAnnotations.Len(); i++ {
+					annotation := board.directorAnnotations.At(i)
+
+					timeShown := now.Sub(annotation.firstShown)
+					isFromLatestFrame := annotation.frame == board.directorFrame
+
+					if timeShown > config.AnnotationDuration && !isFromLatestFrame {
+						board.directorAnnotations.PopFront()
+						continue
+					}
+
+					cell := annotation.Cell
+					start := boardTopLeft.Add(
+						pixel.V(
+							float64(cellWidth*cell.x),
+							-float64(cellWidth*(cell.y+1)),
+						),
+					)
+					end := start.Add(pixel.V(cellWidth, cellWidth))
+					baseColor := pixel.Alpha(0)
+
+					switch annotation.Type {
+					case AnnotateClick:
+						baseColor = pixel.RGB(1, 0, 0)
+					case AnnotateRightClick:
+						baseColor = pixel.RGB(0, 0, 1)
+					case AnnotateMiddleClick:
+						baseColor = pixel.RGB(0, 1, 0)
+					case AnnotateHighlightYellow:
+						baseColor = pixel.RGB(1, 1, 0)
+					}
+
+					alpha := config.AnnotationBaseAlpha
+					if !isFromLatestFrame {
+						progress := 1 - float64(timeShown)/float64(config.AnnotationDuration)
+						alphaMultiplier := InOutCubic(progress)
+						alpha *= alphaMultiplier
+					}
+
+					imd.Color = baseColor.Mul(pixel.Alpha(alpha))
+					imd.Push(start, end)
+					imd.Rectangle(0) // 0 = filled
+				}
+
+				imd.Draw(win)
+			}
+			win.Update()
+
+			frameDuration = time.Now().Sub(frameStart)
+			frameDelay = tickRate - frameDuration
+			if frameDelay <= 0 {
+				frameDelay = time.Nanosecond
+			}
+			ticker.Reset(frameDelay)
 		default:
-		}
-
-		scoreText.Clear()
-		scoreText.Color = colornames.Black
-
-		fmt.Fprintf(scoreText, "%03d", board.numMines-board.numFlags)
-		if !board.canPlay() {
-			var boardState string
-			if board.state == Won {
-				boardState = "WIN!"
-				scoreText.Color = colornames.Green
-			} else if board.state == Lost {
-				boardState = "LOSE :("
-				scoreText.Color = colornames.Red
-			}
-
-			fmt.Fprintf(scoreText, "   %s", boardState)
-		}
-		scoreText.Draw(win, pixel.IM)
-
-		if win.MouseInsideWindow() {
-			x, y := board.screenToGridCoords(win.MousePosition())
-			hoveredCell = board.CellAt(x, y)
-		} else {
-			hoveredCell = nil
-		}
-
-		cellPosText.Clear()
-		if hoveredCell != nil {
-			fmt.Fprintf(cellPosText, "(%d, %d)", hoveredCell.x, hoveredCell.y)
-			cellPosText.Draw(win, pixel.IM)
-		}
-
-		batch.Clear()
-		for y, row := range board.cells {
-			rowStart := boardTopLeft.Add(pixel.V(cellWidth/2, -float64(cellWidth/2+cellWidth*y)))
-
-			for x, cell := range row {
-				cellPos := rowStart.Add(pixel.V(float64(cellWidth*x), 0))
-
-				if cell.isDirty {
-					cell.sprite.Draw(batch, pixel.IM.Moved(cellPos))
-					cell.isDirty = false
-				}
-			}
-		}
-		batch.Draw(win)
-
-		if board.directorAnnotations.Len() > 0 {
-			imd := imdraw.New(nil)
-
-			now := time.Now()
-			for i := 0; i < board.directorAnnotations.Len(); i++ {
-				el := board.directorAnnotations.At(i)
-				if el == nil {
-					continue
-				}
-				annotation := el.(Annotation)
-
-				timeShown := now.Sub(annotation.firstShown)
-				isFromLatestFrame := annotation.frame == board.directorFrame
-
-				if timeShown > config.AnnotationDuration && !isFromLatestFrame {
-					board.directorAnnotations.PopFront()
-					continue
-				}
-
-				cell := annotation.Cell
-				start := boardTopLeft.Add(
-					pixel.V(
-						float64(cellWidth*cell.x),
-						-float64(cellWidth*(cell.y+1)),
-					),
-				)
-				end := start.Add(pixel.V(cellWidth, cellWidth))
-				baseColor := pixel.Alpha(0)
-
-				switch annotation.Type {
-				case AnnotateClick:
-					baseColor = pixel.RGB(1, 0, 0)
-				case AnnotateRightClick:
-					baseColor = pixel.RGB(0, 0, 1)
-				case AnnotateMiddleClick:
-					baseColor = pixel.RGB(0, 1, 0)
-				case AnnotateHighlightYellow:
-					baseColor = pixel.RGB(1, 1, 0)
-				}
-
-				alpha := config.AnnotationBaseAlpha
-				if !isFromLatestFrame {
-					progress := 1 - float64(timeShown)/float64(config.AnnotationDuration)
-					alphaMultiplier := InOutCubic(progress)
-					alpha *= alphaMultiplier
-				}
-
-				imd.Color = baseColor.Mul(pixel.Alpha(alpha))
-				imd.Push(start, end)
-				imd.Rectangle(0) // 0 = filled
-			}
-
-			imd.Draw(win)
 		}
 
 		if board.canPlay() {
 			// Pause with Space
 			if win.JustPressed(pixelgl.KeySpace) {
 				board.TogglePaused()
+				requestFrame()
 			}
 
 			// Perform single step while paused with Right Arrow
@@ -348,18 +364,21 @@ func Run(config GameConfig) {
 				board.TogglePaused()
 				board.RequestDirectorAct()
 				board.TogglePaused()
+				requestFrame()
 			}
 		} else {
 			// Start a new game with Enter
 			if win.JustPressed(pixelgl.KeyEnter) {
 				config.Seed = board.rand.Int63()
 				resetBoard()
+				requestFrame()
 			}
 
 			// Start a new, paused game with Space or Right Arrow
 			if win.JustPressed(pixelgl.KeySpace) || win.JustPressed(pixelgl.KeyRight) {
 				config.Seed = board.rand.Int63()
 				resetBoardPaused()
+				requestFrame()
 			}
 
 			continue
@@ -369,12 +388,15 @@ func Run(config GameConfig) {
 			if hoveredCell != nil {
 				if win.JustPressed(pixelgl.MouseButtonLeft) {
 					hoveredCell.click()
+					requestFrame()
 				}
 				if win.JustPressed(pixelgl.MouseButtonRight) {
 					hoveredCell.rightClick()
+					requestFrame()
 				}
 				if win.JustPressed(pixelgl.MouseButtonMiddle) {
 					hoveredCell.middleClick()
+					requestFrame()
 				}
 			}
 		}
