@@ -225,9 +225,9 @@ func Run(config GameConfig) {
 		frameStart    = time.Now()
 		frameDuration = time.Now().Sub(frameStart)
 		frameDelay    = time.Second * 0
-		second        = time.Tick(time.Second)
-		tickRate      = time.Second / 60
+		tickRate      = time.Second / 120
 		ticker        = time.NewTicker(tickRate)
+		second        = time.Tick(time.Second)
 	)
 
 	requestFrame := func() {
