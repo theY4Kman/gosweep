@@ -51,7 +51,7 @@ type Board struct {
 	directorActRequested *sync.Cond
 	directorCellChanges  chan *Cell
 
-	directorAnnotations deque.Deque
+	directorAnnotations deque.Deque[Annotation]
 
 	onGameEnd func(*Board)
 }
