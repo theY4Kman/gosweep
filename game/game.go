@@ -164,6 +164,13 @@ func Run(config GameConfig) {
 	headerHeight := uint(50)
 	minWindowWith := float64(200)
 
+	spritesheet := loadSpritesheet()
+	windowIconImageData := spritesheet.Image().SubImage(image.Rectangle{
+		Min: image.Point{Y: cellWidth * int(Flag+1)},
+		Max: image.Point{X: cellWidth, Y: cellWidth * int(Flag+2)},
+	})
+	windowIcon := pixel.PictureDataFromImage(windowIconImageData)
+
 	var monitor *pixelgl.Monitor = nil
 	if config.Fullscreen {
 		monitor = pixelgl.PrimaryMonitor()
@@ -171,6 +178,7 @@ func Run(config GameConfig) {
 
 	cfg := pixelgl.WindowConfig{
 		Title: "gosweep",
+		Icon:  []pixel.Picture{windowIcon},
 		Bounds: pixel.R(
 			0, 0,
 			math.Max(float64(config.Width*cellWidth), minWindowWith),
@@ -193,7 +201,6 @@ func Run(config GameConfig) {
 		config.NumMines = uint(float64(config.Width*config.Height) * config.MineDensity)
 	}
 
-	spritesheet := loadSpritesheet()
 	batch := pixel.NewBatch(&pixel.TrianglesData{}, spritesheet)
 
 	var boardTopLeft pixel.Vec
@@ -433,7 +440,7 @@ func InOutCubic(t float64) float64 {
 	}
 }
 
-func loadSpritesheet() pixel.Picture {
+func loadSpritesheet() *pixel.PictureData {
 	img, _, err := image.Decode(bytes.NewReader(spritesheetPNG))
 	if err != nil {
 		panic(err)
