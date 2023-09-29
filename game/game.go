@@ -34,6 +34,8 @@ const (
 type GameConfig struct {
 	Width, Height uint
 	NumMines      uint
+	Fullscreen    bool
+	MineDensity   float64
 	Mode          GameMode
 
 	Seed int64
@@ -60,6 +62,8 @@ func NewGameConfig() GameConfig {
 		Width:               30,
 		Height:              16,
 		NumMines:            99,
+		Fullscreen:          false,
+		MineDensity:         math.NaN(),
 		Mode:                Classic,
 		Director:            nil,
 		DirectorTickRate:    25 * time.Millisecond,
@@ -160,6 +164,11 @@ func Run(config GameConfig) {
 	headerHeight := uint(50)
 	minWindowWith := float64(200)
 
+	var monitor *pixelgl.Monitor = nil
+	if config.Fullscreen {
+		monitor = pixelgl.PrimaryMonitor()
+	}
+
 	cfg := pixelgl.WindowConfig{
 		Title: "gosweep",
 		Bounds: pixel.R(
@@ -167,10 +176,21 @@ func Run(config GameConfig) {
 			math.Max(float64(config.Width*cellWidth), minWindowWith),
 			float64(config.Height*cellWidth+headerHeight),
 		),
+		Monitor: monitor,
 	}
 	win, err := pixelgl.NewWindow(cfg)
 	if err != nil {
 		panic(err)
+	}
+
+	if config.Fullscreen {
+		bounds := win.Bounds()
+		config.Width = uint(bounds.W() / cellWidth)
+		config.Height = uint((bounds.H() - float64(headerHeight)) / cellWidth)
+	}
+
+	if !math.IsNaN(config.MineDensity) {
+		config.NumMines = uint(float64(config.Width*config.Height) * config.MineDensity)
 	}
 
 	spritesheet := loadSpritesheet()

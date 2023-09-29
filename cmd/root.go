@@ -8,7 +8,6 @@ import (
 	"github.com/they4kman/gosweep/director/constraint"
 	"github.com/they4kman/gosweep/game"
 	"io"
-	"io/ioutil"
 	"os"
 	"time"
 )
@@ -66,7 +65,7 @@ Use the director flag to make the computer play for you
 				return err
 			}
 
-			bytes, err := ioutil.ReadAll(file)
+			bytes, err := io.ReadAll(file)
 			if err != nil {
 				return err
 			}
@@ -147,6 +146,8 @@ func init() {
 	rootCmd.Flags().UintVarP(&gameConfig.Width, "width", "w", gameConfig.Width, "Width of game board, in cells")
 	rootCmd.Flags().UintVarP(&gameConfig.Height, "height", "h", gameConfig.Height, "Height of game board, in cells")
 	rootCmd.Flags().UintVarP(&gameConfig.NumMines, "mines", "m", gameConfig.NumMines, "Number of mines to place in the game board")
+	rootCmd.Flags().BoolVar(&gameConfig.Fullscreen, "fullscreen", gameConfig.Fullscreen, "Whether to run in fullscreen mode (overrides --width and --height)")
+	rootCmd.Flags().Float64Var(&gameConfig.MineDensity, "mine-density", gameConfig.MineDensity, "Percentage of mines to cells in the board (overrides --mines)")
 	rootCmd.Flags().Var(newGameModeValue(game.Win7, &gameConfig.Mode), "mode", `Game mode, controlling behaviour of first click.
  - win7:    all cells surrounding the first-clicked cell are cleared of mines
             (first click never loses)
